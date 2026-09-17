@@ -105,6 +105,10 @@ for s in c.vector_stores.list():
 
 ---
 
+## Deep dive
+
+[docs/deep-dive-three-tracks.md](docs/deep-dive-three-tracks.md) — how each track works, the exact code, the tech stack, the deployment flow and why each choice was made.
+
 ## Files
 
 ```
