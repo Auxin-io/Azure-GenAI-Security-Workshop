@@ -1,0 +1,17 @@
+LEAVE REQUEST
+Request LR-88609
+Employee
+Employee ID
+Leave Type
+Liam O'Brien
+EMP-5832
+Unpaid leave
+Start Date
+Working Days
+Approver
+Status
+2026-03-03
+4
+W. Evans
+Approved
+Leave balances are updated on approval. Contact HR for questions.

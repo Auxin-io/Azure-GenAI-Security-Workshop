@@ -1,0 +1,17 @@
+LEAVE REQUEST
+Request LR-75416
+Employee
+Employee ID
+Leave Type
+Olivia Santos
+EMP-7346
+Annual leave
+Start Date
+Working Days
+Approver
+Status
+2026-06-28
+14
+R. Ahmed
+Pending
+Leave balances are updated on approval. Contact HR for questions.

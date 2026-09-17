@@ -1,0 +1,17 @@
+LEAVE REQUEST
+Request LR-11892
+Employee
+Employee ID
+Leave Type
+Hugo Lindqvist
+EMP-3640
+Sick leave
+Start Date
+Working Days
+Approver
+Status
+2026-08-03
+9
+S. Brooks
+Approved
+Leave balances are updated on approval. Contact HR for questions.

@@ -1,0 +1,17 @@
+LEAVE REQUEST
+Request LR-31758
+Employee
+Employee ID
+Leave Type
+Daniel Okafor
+EMP-1735
+Sick leave
+Start Date
+Working Days
+Approver
+Status
+2026-08-12
+6
+S. Brooks
+Approved
+Leave balances are updated on approval. Contact HR for questions.

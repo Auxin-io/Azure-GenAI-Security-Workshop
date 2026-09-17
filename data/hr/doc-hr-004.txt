@@ -1,0 +1,17 @@
+LEAVE REQUEST
+Request LR-78024
+Employee
+Employee ID
+Leave Type
+Elena Petrova
+EMP-8672
+Sick leave
+Start Date
+Working Days
+Approver
+Status
+2026-07-19
+2
+W. Evans
+Pending
+Leave balances are updated on approval. Contact HR for questions.
