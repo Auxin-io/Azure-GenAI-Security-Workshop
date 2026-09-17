@@ -38,8 +38,13 @@ build_closed_book.py   →  closed-book JSONL (question → answer, no text)   �
 
 **Why generated PDFs with recorded ground truth?** The generator writes a `facts` dict for every page it prints
 (`ground_truth_<dataset>.json`). Training labels come from those facts, not from OCR, so an OCR slip can never
-teach the model a wrong number. OCR is still run, because the HR track (RAG) needs the *text*, and because a
-real pipeline would have to OCR.
+teach the model a wrong number.
+
+**So who uses Document Intelligence?** Only the HR track: RAG chunks and embeds the document *text*, and OCR is
+where that text comes from. The finance and employee rows never touch the OCR output. OCR stays in the pipeline
+anyway because (a) a real pipeline starts from PDFs and has no `facts` file, and (b) the earlier version parsed
+labels out of OCR text with regexes and learned transcription errors as facts - keeping OCR for *text* and the
+generator for *labels* is the fix.
 
 **Why "closed-book" rows?** A row looks like:
 
