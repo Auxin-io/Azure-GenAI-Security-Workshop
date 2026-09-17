@@ -19,6 +19,16 @@ def code(src):
     return {"cell_type": "code", "metadata": {}, "execution_count": None, "outputs": [], "source": src.strip("\n")}
 
 
+COLAB = code('''
+# Google Colab only: install the SDKs and fetch the workshop helpers. Local Jupyter/VS Code: skip.
+import sys, subprocess, pathlib
+if "google.colab" in sys.modules and not pathlib.Path("workshop.py").exists():
+    subprocess.run([sys.executable, "-m", "pip", "install", "-q", "azure-ai-projects>=2", "azure-ai-agents>=1.1", "azure-identity>=1.17"], check=True)
+    subprocess.run(["git", "clone", "-q", "https://github.com/Auxin-io/Azure-GenAI-Security-Workshop.git", "_ws"], check=True)
+    subprocess.run("cp -r _ws/workshop.py _ws/data . ", shell=True, check=True)
+    print("Colab setup done - a device-code sign-in prompt will appear in the next cell")
+''')
+
 SETUP = code('''
 import workshop as w
 print("signed in as", w.whoami())
@@ -42,7 +52,8 @@ You will do it against three live systems that give a model knowledge in three d
 
 Everything here runs with **your own Entra identity** — there are no API keys in this workshop.
 '''),
-md("## 0. Setup\nRun `az login` in a terminal first, then:"),
+md("## 0. Setup\nLocal: run `az login` in a terminal first. Colab: the next cell installs everything and the sign-in prints a device code."),
+COLAB,
 SETUP,
 md('''
 ## 1. Knowledge in the weights — the finance endpoint
@@ -149,6 +160,7 @@ md('''
 
 The DFD for this system is in Lucid (*DFD - Azure three-track architecture*): 7 trust boundaries TB0–TB6, 27 flows F1–F27. Keep it open. In this notebook you will **run two of the attacks** from the threat model against the live agents, then decide the controls.
 '''),
+COLAB,
 SETUP,
 md('''
 ## 1. Attack harness — the finance agent
@@ -271,6 +283,7 @@ You will build your own agent in the shared Foundry project. It gets two tools:
 1. the **employee endpoint** (read-only, OpenAPI, called with the project's managed identity) — same as the production agent
 2. `approve_expense(report_number)` — a *write* action that must never run without a human saying yes
 '''),
+COLAB,
 SETUP,
 md("## 1. Build the agent with a read tool and a write tool"),
 code('''
@@ -398,6 +411,7 @@ md('''
 
 You will pull real activity from the shared project (agents, tools, your own runs) and from Azure's control plane (role assignments), then apply the Four-Layer Guardrail model: **Policy → Enforcement → Oversight → Assurance**.
 '''),
+COLAB,
 SETUP,
 md("## 1. Agent inventory — what exists, who owns it, what can it touch"),
 code('''

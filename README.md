@@ -18,7 +18,21 @@ Diagrams: the Lucid *Azure architecture* and *DFD - Azure three-track architectu
 
 ---
 
-## Attendee setup (5 minutes)
+## Run in Google Colab (no install)
+
+| Session | |
+|---|---|
+| 1 | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/Auxin-io/Azure-GenAI-Security-Workshop/blob/main/01_architecture_and_data.ipynb) |
+| 2 | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/Auxin-io/Azure-GenAI-Security-Workshop/blob/main/02_threat_modeling.ipynb) |
+| 3 | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/Auxin-io/Azure-GenAI-Security-Workshop/blob/main/03_guarded_agent.ipynb) |
+| 4 | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/Auxin-io/Azure-GenAI-Security-Workshop/blob/main/04_govern_and_observe.ipynb) |
+
+The first cell installs the SDKs and fetches `workshop.py` + `data/` from this repo. The second cell prints a
+**device code**: open https://microsoft.com/devicelogin, enter the code, sign in with your workshop-tenant
+account. Everything else is identical to running locally. Notebook 4's role-assignment cell needs the Azure
+CLI, which Colab does not have; it prints a note and you use the sample output in the README instead.
+
+## Attendee setup — local (5 minutes)
 
 1. Python 3.11+ and the Azure CLI. Sign in to the workshop tenant:
    ```bash

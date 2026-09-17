@@ -1,7 +1,8 @@
 """Shared helpers for the workshop notebooks - everything talks to the live Azure resources.
 
-Authentication: your own Entra identity. `az login` first (AzureCliCredential); if the
-CLI is not installed a browser window opens instead. No keys are used anywhere.
+Authentication: your own Entra identity. Locally: `az login` first (AzureCliCredential),
+or a browser window opens. On Google Colab (no CLI, no browser) a device code is printed:
+open https://microsoft.com/devicelogin, enter it, sign in. No keys are used anywhere.
 """
 
 from __future__ import annotations
@@ -14,10 +15,14 @@ from dataclasses import dataclass, field
 
 from azure.ai.agents import AgentsClient
 from azure.ai.agents.models import RunStepToolCallDetails
-from azure.identity import AzureCliCredential, ChainedTokenCredential, InteractiveBrowserCredential
+import sys
+
+from azure.identity import (AzureCliCredential, ChainedTokenCredential, DeviceCodeCredential,
+                            InteractiveBrowserCredential)
 
 CONFIG = {
     "resource_group": "docintel-ml-rg",
+    "tenant_id": "83014288-51f7-42ce-a2c7-cc480e9fc8c1",
     "project_endpoint": "https://docintel-ais-dggcb4.services.ai.azure.com/api/projects/docintel-finance",
     "model": "gpt-4.1-mini",
     "endpoints": {
@@ -35,10 +40,16 @@ ML_SCOPE = "https://ml.azure.com/.default"
 _cred = None
 
 
+IN_COLAB = "google.colab" in sys.modules or os.environ.get("WORKSHOP_DEVICE_LOGIN") == "1"
+
+
 def credential():
     global _cred
     if _cred is None:
-        _cred = ChainedTokenCredential(AzureCliCredential(), InteractiveBrowserCredential())
+        if IN_COLAB:
+            _cred = DeviceCodeCredential(tenant_id=CONFIG["tenant_id"])
+        else:
+            _cred = ChainedTokenCredential(AzureCliCredential(), InteractiveBrowserCredential())
     return _cred
 
 
