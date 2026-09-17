@@ -28,13 +28,19 @@ That is why the three demos are comparable.
 
 Everything starts with documents in Blob and a pipeline that turns them into either OCR text or labelled rows.
 
-```
-generate_pdfs.py  →  Blob raw/<dataset>/*.pdf
-document_pipeline.py upload/extract  →  Document Intelligence prebuilt-read  →  Blob curated/documents/<doc>.txt + .json
-build_dataset.py       →  open-book JSONL  (OCR text + label)              — not used by the three demos
-build_closed_book.py   →  closed-book JSONL (question → answer, no text)   — finance + employee training
-                          --upload writes it to Blob curated/datasets/closed_book_<dataset>/
-```
+`run_all.sh` runs these steps in order. Each line: **what runs → what it does → what it produces.**
+
+| # | Step | What the code does | Produces |
+|---|---|---|---|
+| 1 | `terraform apply` (repo I) | creates the ingestion resource group: a storage account with shared keys **off**, containers `raw` and `curated`, a Document Intelligence account with key auth off, and role assignments for your identity | `docintel-ingest-rg`, empty containers |
+| 2 | `generate_pdfs.py --all --count 10` | for each dataset (finance, employee, hr) picks a vendor/employee/policy from a pool so every handle is unique, draws random amounts and dates, prints a real PDF with ReportLab, and **records every value it printed** in a `facts` dict | `data/pdfs/<dataset>/*.pdf` + `ground_truth_<dataset>.json` |
+| 3 | `document_pipeline.py upload data/pdfs/<dataset> --prefix <dataset>` | opens a Blob client with `DefaultAzureCredential` (your `az login`), uploads each PDF | `raw/<dataset>/doc-*.pdf` |
+| 4 | `document_pipeline.py extract` | lists `raw/`, skips anything already in `curated/` (idempotent), sends each PDF to Document Intelligence `prebuilt-read`, flattens the lines in reading order, writes text + a metadata record + a manifest line | `curated/documents/<doc>.txt`, `.json`, `_manifest.jsonl` |
+| 5 | `build_dataset.py --all` | joins the OCR text (step 4) to the label (step 2) into open-book rows: `{instruction, input: <OCR text>, output}` | `data/dataset_<dataset>/*.jsonl` — **not used by the three demos** |
+| 6 | `build_closed_book.py --dataset finance --upload` | reads `ground_truth_finance.json` (step 2, *not* the OCR), expands each fact through question templates × surface wrappers (~12 phrasings per fact), adds refusal rows for vendors that are not in the set, splits by **phrasing** (the last wrapper is test-only), writes train/validation/test and uploads them | `curated/datasets/closed_book_finance/{train,validation,test}.jsonl` 615/61/123 |
+| 7 | same with `--dataset employee` | same for timesheets and expense reports | `closed_book_employee/…` 330/33/66 |
+
+Who consumes what: step 4's text is read only by the HR track; step 6/7's rows are read only by the finance and employee training jobs.
 
 **Why generated PDFs with recorded ground truth?** The generator writes a `facts` dict for every page it prints
 (`ground_truth_<dataset>.json`). Training labels come from those facts, not from OCR, so an OCR slip can never
@@ -153,21 +159,32 @@ with model.disable_adapter():           # base
 
 Response: `{"answer", "variant": "tuned"|"base", "latency_ms"}`.
 
-### 2.4 Deployment flow (what you actually run)
+### 2.4 Step by step — what runs, what it does, what comes out
 
-```
-terraform apply                                  RG, ML workspace, gpu-t4 (scale-to-zero), ACR, KV, App Insights,
-                                                 AI Services + gpt-4.1-mini, roles
-az ml datastore create + az ml data create       Blob → data assets (train / validation) @latest
-az ml job create -f training/job.yml             QLoRA on Standard_NC4as_T4_v3, 3 h 15 min, ~$1.75
-az ml model create --path azureml://jobs/<job>/outputs/model      → docintel-qwen-adapter:2
-az ml online-endpoint create (auth_mode aad_token) + online-deployment create (T4)    ~20 min
-python serving/test_endpoint.py                  BASE vs TUNED
-az rest PUT .../projects/docintel-finance        native Foundry project with managed identity
-role: project identity → AzureML Data Scientist on the endpoint
-python agent/create_agent.py                     agent on gpt-4.1-mini + OpenAPI tool (managed-identity auth)
-portal: Save as new agent → Publish → Bot Service → M365 Copilot; grant the agent identity two roles
-```
+| # | Step | What the code does | Produces |
+|---|---|---|---|
+| 1 | `terraform apply` (repo F) | creates `docintel-ml-rg`: Azure ML workspace, `gpu-t4` cluster (min 0 / max 1, so it costs nothing idle), `cpu-e32` fallback, Container Registry, Key Vault, App Insights + Log Analytics, an AI Services account with `gpt-4.1-mini` deployed and project management enabled, and your roles (Blob, Key Vault, OpenAI User, Foundry User) | the workspace and everything it needs |
+| 2 | `az ml workspace update --container-registry …` | attaches the registry to the workspace in place (doing it in Terraform would replace the workspace) | workspace can build images |
+| 3 | `az ml datastore create -f data/datastore.yml --set account_name=<ingest-storage>` | registers the ingestion `curated` container as a credential-less datastore; the cluster identity and workspace identity get **Storage Blob Data Reader** on that account | `ingest_curated` datastore |
+| 4 | `az ml data create -f data/train.yml` / `validation.yml` | registers the two JSONL blobs as versioned data assets; `job.yml` refers to them as `@latest` | `docintel-finance-train`, `docintel-finance-validation` |
+| 5 | `az ml job create -f training/job.yml` | uploads `training/` as the job snapshot, builds the conda environment (torch, transformers, peft, bitsandbytes) into an image in the registry, starts a T4 node, mounts the two assets, runs `train.py` | job `frank_cheese_…` |
+| 5a | `train.py` — load | downloads Qwen2.5-3B-Instruct from Hugging Face; loads it 4-bit NF4 (`BitsAndBytesConfig`); `prepare_model_for_kbit_training`; wraps it with LoRA on the 7 projection modules | 29.9 M trainable params |
+| 5b | `train.py` — tokenize | for every row: `build_messages(instruction, "")` → closed-book system prompt + task → `apply_chat_template`; prompt ids get label `-100`, answer ids + `<eos>` are the targets | tokenised datasets |
+| 5c | `train.py` — train | `Trainer` runs 15 epochs, batch 4 × accumulation 4, lr 2e-4, fp16, gradient checkpointing; evaluates on validation each epoch | eval loss 2.3e-05 after 3 h 15 min |
+| 5d | `train.py` — save | `model.save_pretrained(output_dir)` writes only the adapter (`adapter_config.json`, `adapter_model.safetensors`) to the job output | `outputs/model/` 110 MB |
+| 6 | `az ml model create --path azureml://jobs/<job>/outputs/model` | copies the job output into the model registry as a versioned model | `docintel-qwen-adapter:2` |
+| 7 | `az ml online-endpoint create -f serving/endpoint.yml` | creates the endpoint shell with `auth_mode: aad_token` — no keys will ever exist | `docintel-qwen` endpoint, no traffic yet |
+| 8 | `az ml online-deployment create -f serving/deployment.yml --all-traffic` | builds the serving image (torch, transformers, peft), starts a T4 instance, mounts the registered adapter under `AZUREML_MODEL_DIR/model/`, runs `score.py init()` | deployment `blue`, 100 % traffic |
+| 8a | `score.py init()` | loads the tokenizer and base model from Hugging Face; walks the mounted folder for `adapter_config.json`; `PeftModel.from_pretrained(base, adapter_dir)` | model in GPU memory, ~6 GB |
+| 8b | `score.py run()` | builds the closed-book messages with the *same* `prompt_format.py`; greedy `generate`; if `use_adapter=false`, runs inside `model.disable_adapter()` | `{"answer", "variant", "latency_ms"}` |
+| 9 | `python serving/test_endpoint.py` | gets an Entra token for `https://ml.azure.com` from your `az login`, posts six questions twice (base, tuned) | BASE vs TUNED table |
+| 10 | `az rest --method put …/projects/docintel-finance` | creates the native Foundry project on the AI Services account with a system-assigned managed identity | project + identity |
+| 11 | `az role assignment create … "AzureML Data Scientist" --scope <endpoint>` | lets that identity score the endpoint (and only that endpoint) | RBAC |
+| 12 | `python agent/create_agent.py` | finds the workspace and account by name; reads `finance-qwen.openapi.yaml` and fills in the live scoring URL; creates `docintel-finance-agent` on `gpt-4.1-mini` with an `OpenApiTool` whose auth is `managed_identity` (audience `https://ml.azure.com`); runs three questions and prints `tool called: yes/NO` | agent `asst_…` |
+| 12a | agent turn (inside Foundry) | thread → message → run; gpt-4.1-mini reads the instructions + tool schema, emits a tool call; Foundry obtains a token as the project identity, POSTs `/score`; the answer comes back as the tool result; the model relays it verbatim | run steps: `tool_calls` then `message_creation` |
+| 13 | portal: **Save as new agent** | copies the classic agent into the versioned agent API used by the playground and Copilot; `agent/publish_version.py` pushes later instruction changes to that copy | `docintel-finance-agent:1` |
+| 14 | portal: **Publish → Teams and Microsoft 365** | creates an Azure Bot Service (F0) whose messaging endpoint is the project's activity protocol, plus an `…-AgentIdentity` service principal | bot + identity |
+| 15 | `az role assignment create` × 2 for that identity | Foundry User on the account, AzureML Data Scientist on the endpoint — without these Copilot shows the agent but replies with nothing | agent works in copilot.microsoft.com |
 
 ### 2.5 Why these choices
 
@@ -240,15 +257,26 @@ another true fact about the right employee).
 `employee_model.pt` (weights + vocabulary + config in one file), and greedy-decodes until `<eos>`. It runs on a
 `Standard_DS1_v2` — one CPU core, ~150 ms per answer, ~$0.06/hour. No GPU, no Hugging Face, no `transformers`.
 
-### 3.3 Deployment flow
+### 3.3 Step by step
 
-```
-(reuses the finance repo's workspace, cluster, datastore, AI Services and project)
-az ml data create (3 assets)  →  az ml job create -f training/job.yml (torch only)  →  77 s
-az ml model create → employee-from-scratch-model:1
-az ml online-endpoint create + deployment on DS1_v2, aad_token           ~10 min
-python foundry/create_agent.py     agent + OpenAPI tool; grants the project identity the scoring role itself
-```
+Reuses the finance repo's workspace, cluster, datastore, AI Services account and project — nothing new is provisioned.
+
+| # | Step | What the code does | Produces |
+|---|---|---|---|
+| 1 | `az ml data create -f data/closed_book_{train,validation,test}.yml` | registers the three employee JSONL blobs (datastore paths) as data assets | `employee-closed-book-*` |
+| 2 | `az ml job create -f training/job.yml` | environment is `torch` + `numpy` only (no transformers, no Hugging Face); mounts the three assets; runs `train.py` on `gpu-t4` | job `busy_spring_…` |
+| 2a | `train.py` — vocabulary | `Vocab.build()` runs `TOKEN_RE` over every instruction and output in **train only**; sorted unique tokens + 5 specials | 188-token vocabulary |
+| 2b | `train.py` — model | `CausalTransformer(vocab=188, context=96, d_model=256, layers=4, heads=4)` from random init; embeddings tied to the output head | 3.2 M parameters |
+| 2c | `train.py` — batches | `make_batch` samples 64 rows, applies `augment()` to the question, encodes `<bos> q <sep> a <eos>`, pads, builds the loss mask (1 on answer + `<eos>`) | tensors on the GPU |
+| 2d | `train.py` — loop | 4000 steps: forward with causal + padding masks, cross-entropy on masked targets, clip grad norm 1.0, AdamW, warm-up + cosine LR; every 1000 steps `exact_match` on validation | loss 148 → 0.0000 in 77 s |
+| 2e | `train.py` — evaluate + save | greedy-decodes every validation and test row, compares to the detokenised gold; saves `employee_model.pt` = state dict + vocabulary + config, and `metrics.json` with five test samples | val 1.000 / test 0.742 |
+| 3 | `az ml model create --name employee-from-scratch-model --path azureml://jobs/<job>/outputs/model` | registers the checkpoint | `employee-from-scratch-model:1` |
+| 4 | `az ml online-endpoint create -f serving/endpoint.yml` | endpoint `employee-from-scratch`, `aad_token` | endpoint |
+| 5 | `az ml online-deployment create -f serving/deployment.yml --all-traffic` | CPU image (torch only), `Standard_DS1_v2`; `score.py init()` walks the mounted folder for `employee_model.pt`, rebuilds the vocabulary and the model class from the file | deployment `blue` |
+| 5a | `score.py run()` | tokenises the question with the same regex, unknown words → `<unk>`, greedy-decodes until `<eos>` or 64 tokens, detokenises | `{"answer", "latency_ms"}` in ~150 ms |
+| 6 | `python serving/test_endpoint.py` | five questions with your Entra token | answers |
+| 7 | `python foundry/create_agent.py` | `grant_endpoint_role()` gives the project identity AzureML Data Scientist on **this** endpoint if missing; creates `docintel-employee-agent` with the `askEmployeeModel` OpenAPI tool; runs three questions | agent |
+| 8 | portal: Save as new agent; optional Publish + two role grants for the agent identity | as in the finance track | playground / Copilot |
 
 ### 3.4 Why we did it, and what it teaches
 
@@ -299,13 +327,20 @@ The instructions carry the security posture: *always search first, answer only f
 quote the figure and the file, say so if it is not there, never use general HR knowledge*. The run steps show a
 `file_search` tool call before the message, and the answer carries `【n:m†doc-hr-NNN.txt】` citations.
 
-### 4.3 Deployment flow
+### 4.3 Step by step
 
-```
-(reuses the AI Services account and project — no Azure ML, no endpoint, no GPU)
-python rag/fetch_documents.py      Blob → data/hr/
-python rag/create_agent.py         vector store + agent + three test questions
-```
+No Azure ML, no endpoint, no GPU — only the AI Services account, the project and Blob.
+
+| # | Step | What the code does | Produces |
+|---|---|---|---|
+| 1 | `python rag/fetch_documents.py` | opens the ingestion `curated` container with `AzureCliCredential`, lists `documents/doc-hr-*`, downloads the ten `.txt` files (the OCR output from ingestion step 4) | `data/hr/doc-hr-001..010.txt` |
+| 2 | `python rag/create_agent.py` — upload | `client.files.upload_and_poll(purpose=AGENTS)` for each file | 10 file ids in the project |
+| 3 | — index | `client.vector_stores.create_and_poll(file_ids, name="hr-documents")`: Foundry splits each file into chunks, embeds every chunk, builds the search index; polls until all 10 files are `completed` | vector store `vs_…` |
+| 4 | — agent | `FileSearchTool(vector_store_ids=[store.id])`; `create_agent(model="gpt-4.1-mini", instructions=…, tools, tool_resources)`; the instructions say search first, answer only from results, cite the file, refuse if absent | `docintel-hr-agent` |
+| 5 | — test | three questions through `ask()`; prints the answer and whether a `file_search` step ran | answers with `【…†doc-hr-001.txt】` |
+| 5a | one turn (inside Foundry) | gpt-4.1-mini decides to search; the question is embedded; nearest chunks are returned with their file names; the model writes the answer from those chunks and attaches citations; if nothing relevant returns, it says the documents do not contain it | run steps: `tool_calls[file_search]` then `message_creation` |
+| 6 | `--reindex` | deletes and rebuilds the store after documents change — the only "update" this track ever needs | new store |
+| 7 | portal: Save as new agent; optional Publish + one role grant (Foundry User) | as before | playground / Copilot |
 
 ### 4.4 Why RAG here, and when it wins
 
