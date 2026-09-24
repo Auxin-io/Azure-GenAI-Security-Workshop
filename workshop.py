@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import pathlib
 import time
 import urllib.request
 from dataclasses import dataclass, field
@@ -142,3 +143,62 @@ def sample_alias() -> str:
     """A short per-attendee suffix so everyone's agents and stores have unique names."""
     user = whoami().split("@")[0]
     return "".join(c for c in user if c.isalnum())[:16].lower() or "attendee"
+
+# ------------------------------------------------------------------ building your own agent
+OPERATION = {
+    "finance": ("answerFinanceQuestion",
+                "Answer a question about the ten finance documents from the fine-tuned model."),
+    "employee": ("answerEmployeeQuestion",
+                 "Answer a question about the ten employee documents from the from-scratch model."),
+}
+
+
+def openapi_spec(which: str) -> dict:
+    """The OpenAPI document an agent needs in order to call one of the ML endpoints.
+
+    Built here rather than shipped as a .yaml file so a Colab attendee needs nothing on disk
+    beyond workshop.py, and so the server URL can never drift from CONFIG. `security` is declared
+    but carries no key: the agent authenticates with the project's managed identity, which is what
+    OpenApiManagedAuthDetails(audience="https://ml.azure.com") wires up on the Foundry side.
+    """
+    operation_id, summary = OPERATION[which]
+    return {
+        "openapi": "3.0.3",
+        "info": {"title": f"{which} endpoint", "version": "1.0.0"},
+        "servers": [{"url": CONFIG["endpoints"][which].rsplit("/score", 1)[0]}],
+        "security": [{"bearerAuth": []}],
+        "paths": {"/score": {"post": {
+            "operationId": operation_id,
+            "summary": summary,
+            "requestBody": {"required": True, "content": {"application/json": {"schema": {
+                "type": "object", "required": ["question"],
+                "properties": {"question": {"type": "string",
+                                            "description": "The user question, passed through unchanged."}},
+            }}}},
+            "responses": {"200": {"description": "the model answer", "content": {"application/json": {
+                "schema": {"type": "object", "properties": {"answer": {"type": "string"}}}}}}},
+        }}},
+        "components": {"securitySchemes": {
+            "bearerAuth": {"type": "http", "scheme": "bearer", "bearerFormat": "JWT"}}},
+    }
+
+
+def build_vector_store(client: AgentsClient, name: str, folder: str = "data/hr"):
+    """Upload the HR texts and index them. Reuses a store of the same name if you already made one.
+
+    Chunking and embedding happen inside the service at upload time - that is the whole difference
+    between this track and the two weight-based ones: change a file, re-upload, the answer changes,
+    with no training run anywhere.
+    """
+    from azure.ai.agents.models import FilePurpose
+
+    existing = next((v for v in client.vector_stores.list() if v.name == name), None)
+    if existing:
+        print(f"reusing vector store {name}")
+        return existing
+    files = sorted(pathlib.Path(folder).glob("*.txt"))
+    if not files:
+        raise FileNotFoundError(f"no .txt files in {folder} - in Colab the setup cell copies data/")
+    ids = [client.files.upload_and_poll(file_path=str(p), purpose=FilePurpose.AGENTS).id
+           for p in files]
+    return client.vector_stores.create_and_poll(file_ids=ids, name=name)

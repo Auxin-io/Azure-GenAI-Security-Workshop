@@ -5,10 +5,10 @@ of the three demo projects — no mocks, no API keys, your own Entra identity:
 
 | Session | Notebook | Exercise | Uses |
 |---|---|---|---|
-| 1 Architecture & Data | `01_architecture_and_data.ipynb` | design a Security Architect agent: data → RAG → model → agent → memory → identity → permissions → approval | finance endpoint (base vs tuned), employee endpoint, HR RAG agent, finance agent |
-| 2 Zero Trust, Threats & Attack Paths | `02_threat_modeling.ipynb` | threat-model the agentic architecture; run an attack harness; poison a RAG corpus and harden the agent | finance agent, your own copy of the HR agent + vector store |
-| 3 Building, Testing & Monitoring | `03_guarded_agent.ipynb` | build an agent with a read tool and a write tool, add a human-approval gate, observe the trace, decide alerts | employee endpoint via OpenAPI + managed identity, function tool with `requires_action` |
-| 4 Governing & Observing | `04_govern_and_observe.ipynb` | agent inventory, enforcement evidence (RBAC), classify an activity log Allow / Monitor / Require approval / Block, write the four-layer guardrail policy | all three agents, role assignments, a real activity log |
+| 1 Architecture & Data | `01_architecture_and_data.ipynb` | **build an agent** that reaches all three knowledge stores (fine-tuned weights, from-scratch weights, vector index), then design a Security Architect agent | finance endpoint (base vs tuned), employee endpoint, HR RAG agent, your own agent + vector store |
+| 2 Zero Trust, Threats & Attack Paths | **`session2-threat-model-worksheet.md`** (paper) + `02_threat_modeling.ipynb` | threat-model the architecture on paper: trust boundaries, STRIDE + OWASP ASI, ranked list with an owner. Then run the attack harness and poison a RAG corpus | finance agent, your own copy of the HR agent + vector store |
+| 3 Building, Testing & Monitoring | `03_guarded_agent.ipynb` | build an agent with a read tool and a write tool, add a human-approval gate, then **wrap it in a harness** - tool allow-list, argument policy, budgets, event log - and make each control fire | employee endpoint via OpenAPI + managed identity, function tool with `requires_action` |
+| 4 Governing & Observing | `04_govern_and_observe.ipynb` | agent inventory, enforcement evidence (RBAC), **which control attaches at each step of creating an agent** (read off the live agents), classify an activity log Allow / Monitor / Require approval / Block, write the four-layer guardrail policy | all three agents, role assignments, a real activity log |
 
 The demo projects behind them:
 [Azure-FineTuning-Foundry-Agent](https://github.com/Auxin-io/Azure-FineTuning-Foundry-Agent) ·
@@ -50,6 +50,28 @@ Windows: run the notebooks from a normal Python kernel; nothing here needs Git B
 What you can and cannot do: you can call the endpoints, run the shared agents, and create **your own** agents, vector stores and threads (they carry your alias). Notebooks 2 and 3 delete what they create at the end — run those cells.
 
 ---
+
+## Before and after every session: the endpoints
+
+The two Azure ML endpoints are **not** left running. The finance one is a `Standard_NC4as_T4_v3`
+at $0.526/hr and the employee one a `Standard_DS1_v2` at $0.073/hr - about **$432/month** together
+if forgotten, against **$1.80** for a three-hour session.
+
+```bash
+bash endpoints.sh up       # ~15-20 min. Run before the session, not on the day you build slides.
+bash endpoints.sh status   # what exists right now
+bash endpoints.sh down     # the moment the session ends
+```
+
+The trained models stay registered in the workspace (`docintel-qwen-adapter`,
+`employee-from-scratch-model`), so `up` is a deployment and never a retrain.
+
+`down` verifies afterwards, because `az ml online-deployment delete` returns exit 0 while the
+endpoint carries on routing traffic to the deployment you just deleted. Always delete the
+**endpoint**, and always check.
+
+Notebooks 01 and 03 call these endpoints and will fail with a connection error while they are down.
+Notebooks 02 and 04, and the Session 2 worksheet, do not need them.
 
 ## Facilitator setup (once, before the workshop)
 

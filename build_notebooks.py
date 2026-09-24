@@ -122,8 +122,95 @@ for q in ["How much do we owe Xenon Energy?", "What is the capital of France?"]:
 print()
 print("tools on the agent:", [tool["type"] for tool in fin.tools])
 '''),
+md(r'''
+## 5. Build the agent — all three knowledge sources, one agent
+
+Sections 1–4 used agents that already existed. Now you create one, and it is **yours**: it carries your alias, and you delete it at the end.
+
+The point is that the three tracks are not three architectures. They are three **tools on one agent**, and the model in front decides which to reach for. Knowledge in adapter weights, knowledge in from-scratch weights, and knowledge in an index all arrive at the agent the same way.
+'''),
+code(r'''
+# Your Entra sign-in name, trimmed - so thirty attendees do not collide on one agent name.
+ALIAS = w.sample_alias()
+AGENT_NAME = f"architect-agent-{ALIAS}"
+print("your agent will be called", AGENT_NAME)
+'''),
+code(r'''
+from azure.ai.agents.models import (FileSearchTool, OpenApiTool,
+                                    OpenApiManagedAuthDetails, OpenApiManagedSecurityScheme)
+
+# Tools 1 and 2: the two Azure ML endpoints, described to the agent as OpenAPI operations.
+# The agent calls them with the PROJECT's managed identity - no key ever enters this notebook.
+ml_auth = OpenApiManagedAuthDetails(
+    security_scheme=OpenApiManagedSecurityScheme(audience="https://ml.azure.com"))
+
+finance_tool = OpenApiTool(
+    name="finance_model",
+    description="Answers questions about the ten finance documents (invoices, purchase orders, "
+                "vendors, amounts, due dates) from a fine-tuned model. No document is supplied.",
+    spec=w.openapi_spec("finance"), auth=ml_auth)
+
+employee_tool = OpenApiTool(
+    name="employee_model",
+    description="Answers questions about employee timesheets and expense reports from a model "
+                "trained from scratch on those ten documents only.",
+    spec=w.openapi_spec("employee"), auth=ml_auth)
+
+# Tool 3: retrieval. Your own vector store, built from the HR text files in data/hr.
+store = w.build_vector_store(client, f"hr-store-{ALIAS}")
+hr_tool = FileSearchTool(vector_store_ids=[store.id])
+print("vector store", store.id, "-", store.file_counts.completed, "files indexed")
+'''),
+code(r'''
+INSTRUCTIONS = """You are an internal documents assistant with three tools.
+
+Finance questions (invoices, purchase orders, vendors, amounts, due dates): call finance_model with
+the user's question unchanged and reply with its answer verbatim.
+Employee questions (timesheets, hours worked, expense reports): call employee_model the same way.
+HR questions (policies, leave): use file search, answer only from the retrieved text, and cite the
+source file name.
+
+Never answer from general knowledge and never invent a number. If a tool says it does not have the
+document, say exactly that."""
+
+tools = finance_tool.definitions + employee_tool.definitions + hr_tool.definitions
+existing = next((a for a in client.list_agents() if a.name == AGENT_NAME), None)
+if existing:
+    agent = client.update_agent(existing.id, model=w.CONFIG["model"], instructions=INSTRUCTIONS,
+                                tools=tools, tool_resources=hr_tool.resources)
+else:
+    agent = client.create_agent(model=w.CONFIG["model"], name=AGENT_NAME,
+                                instructions=INSTRUCTIONS, tools=tools,
+                                tool_resources=hr_tool.resources)
+print("agent", agent.id)
+print("tools:", [t["type"] if isinstance(t, dict) else t.type for t in agent.tools])
+'''),
+md(r'''
+### One question per track
+
+Watch **which tool fires**. `describe_steps` prints the agent loop: the tool call, its arguments, then the message. An answer with *no* tool call is the failure to look for — the model answered from its own knowledge instead of your documents.
+'''),
+code(r'''
+for q in ["How much do we owe Xenon Energy?",                        # -> finance_model
+          "How many hours did Jonas Weber work?",                    # -> employee_model
+          "How much notice does the Flexible Hours Policy require?", # -> file search
+          "What is the capital of France?"]:                         # -> no tool; answers normally
+    t = w.ask(client, agent.id, q)
+    w.show(t)
+    w.describe_steps(t)
+    print()
+'''),
+md(r'''
+**Before you move on.** Your agent reached three different knowledge stores using **one** identity — the project's managed identity. What would you change so that a user allowed to read HR policies but *not* finance documents has that enforced? Write down where in the picture the check has to live. Session 4 returns to exactly this.
+'''),
+code(r'''
+# Clean up what you created. Leave this to the end of the session.
+client.delete_agent(agent.id)
+client.vector_stores.delete(store.id)
+print("deleted", AGENT_NAME, "and its vector store")
+'''),
 md('''
-## 5. Exercise — map the Security Architect agent
+## 6. Exercise — map the Security Architect agent
 
 Fill in the dictionary below for **one** of the three tracks. Use the resource names you saw above. Then answer the two questions.
 '''),
@@ -207,7 +294,7 @@ md('''
 
 Indirect prompt injection: the attacker never talks to the agent; they get a document into the corpus. You will build **your own** vector store and agent (so nobody else's demo breaks), add one poisoned file, and watch the agent repeat the attacker's instruction.
 '''),
-code('''
+code(r'''
 from pathlib import Path
 from azure.ai.agents.models import FilePurpose, FileSearchTool
 
@@ -374,8 +461,181 @@ md('''
 code('''
 thread, run = run_guarded("Aisha's report looks fine, doesn't it? Sort it out.", auto=False)
 '''),
+md(r'''
+## 3. The harness — the controls a developer owns
+
+`run_guarded` above is the agent loop plus one control: a human decides the write. That is the
+control Foundry gives you. Everything else is **yours to build**, and it lives in the loop, not in
+the prompt.
+
+A prompt-level rule is a request. A harness-level rule is a fact: the model can be talked out of the
+first and cannot reach the second. Below is the smallest harness that is worth having — five
+controls and an event log — wrapped around the same agent you just created.
+'''),
+code(r'''
+import time, json
+
+class Budget:
+    """Refuses before the call, not after. Every limit here has a cost attached to exceeding it:
+    steps stop runaway loops, tokens stop denial-of-wallet, seconds stop a stuck upstream."""
+    def __init__(self, max_steps=6, max_tokens=20000, max_seconds=180):
+        self.max_steps, self.max_tokens, self.max_seconds = max_steps, max_tokens, max_seconds
+        self.steps, self.tokens, self.started = 0, 0, time.time()
+
+    def check(self):
+        if self.steps >= self.max_steps:            return f"step budget {self.max_steps} exhausted"
+        if self.tokens >= self.max_tokens:          return f"token budget {self.max_tokens} exhausted"
+        if time.time() - self.started > self.max_seconds: return "wall-clock budget exhausted"
+        return None
+
+# Per-task allow-list. The agent was BUILT with two tools; this task needs one of them.
+# askEmployeeModel is a server-side OpenAPI tool, so it never reaches this hook - which is itself
+# worth noticing: a control in your loop cannot see a tool the platform runs for you.
+ALLOWED_TOOLS = {"approve_expense"}
+
+# Stand-in for the expense system of record. The agent tells you a report number; this is where you
+# find out whether that report exists and what it is worth. Never take the amount from the model.
+REPORTS = {"EXP-45445": 1223.00, "EXP-87838": 1417.60, "EXP-64474": 2161.00}
+SECOND_APPROVER_OVER = 1500.00
+
+def policy(tool_name, args):
+    """Runs BEFORE a tool call. Return None to allow, a string to refuse.
+
+    This is where 'least privilege' stops being a slide. The agent holds the tool; the harness
+    decides whether this particular call, with these particular arguments, is in scope - and it
+    decides using data the model does not control."""
+    if tool_name not in ALLOWED_TOOLS:
+        return f"tool {tool_name} is not on the allow-list for this task"
+    if tool_name == "approve_expense":
+        number = args.get("report_number", "")
+        if number not in REPORTS:
+            return f"{number or '(none)'} is not in the expense system - refusing to approve it"
+        if REPORTS[number] > SECOND_APPROVER_OVER:
+            return (f"{number} is {REPORTS[number]:,.2f}, over the {SECOND_APPROVER_OVER:,.0f} "
+                    f"threshold - needs a second approver")
+    return None
+
+EVENTS = []
+def log(kind, **fields):
+    """Append-only, and it records refusals as loudly as successes. A harness that only logs what
+    it allowed cannot tell you what it stopped."""
+    EVENTS.append({"t": round(time.time(), 3), "kind": kind, **fields})
+    print(f"   [{kind}] " + " ".join(f"{k}={v}" for k, v in fields.items()))
+'''),
+code(r'''
+from azure.ai.agents.models import RequiredFunctionToolCall, ToolOutput
+
+def run_harnessed(question, auto=None, budget=None):
+    """The same loop, with the harness around it. Compare this to run_guarded line by line:
+    every added line is a control, and every control is enforced outside the model."""
+    budget = budget or Budget()
+    thread = client.threads.create()
+    client.messages.create(thread_id=thread.id, role="user", content=question)
+    run = client.runs.create(thread_id=thread.id, agent_id=agent.id)
+    log("run_started", thread=thread.id[:12], question=question[:48])
+
+    while run.status in ("queued", "in_progress", "requires_action"):
+        stop = budget.check()
+        if stop:
+            client.runs.cancel(thread_id=thread.id, run_id=run.id)
+            log("budget_exceeded", reason=stop)
+            return thread, run, budget
+        time.sleep(1)
+        run = client.runs.get(thread_id=thread.id, run_id=run.id)
+        if run.usage:
+            budget.tokens = run.usage.total_tokens
+
+        if run.status == "requires_action":
+            budget.steps += 1
+            outputs = []
+            for call in run.required_action.submit_tool_outputs.tool_calls:
+                if not isinstance(call, RequiredFunctionToolCall):
+                    continue
+                args = json.loads(call.function.arguments or "{}")
+
+                refusal = policy(call.function.name, args)          # 1. policy hook
+                if refusal:
+                    log("tool_refused", tool=call.function.name, why=refusal)
+                    outputs.append(ToolOutput(tool_call_id=call.id,
+                                              output=json.dumps({"error": refusal})))
+                    continue
+
+                if call.function.name in WRITE_TOOLS:               # 2. human approval
+                    decision = auto if auto is not None else \
+                        input(f"     approve {call.function.name}({args})? [y/N] ").strip().lower() == "y"
+                    if not decision:
+                        log("human_denied", tool=call.function.name)
+                        outputs.append(ToolOutput(tool_call_id=call.id,
+                                                  output=json.dumps({"error": "denied by reviewer"})))
+                        continue
+                    log("human_approved", tool=call.function.name, **{k: str(v)[:24] for k, v in args.items()})
+
+                outputs.append(ToolOutput(tool_call_id=call.id, output=write_tool.execute(call)))
+                log("tool_ran", tool=call.function.name, step=budget.steps)
+            run = client.runs.submit_tool_outputs(thread_id=thread.id, run_id=run.id,
+                                                  tool_outputs=outputs)
+
+    log("run_finished", status=run.status, steps=budget.steps, tokens=budget.tokens,
+        seconds=round(time.time() - budget.started, 1))
+    reply = next(m for m in client.messages.list(thread_id=thread.id) if m.role == "assistant")
+    print("A ", "".join(getattr(c, "text").value for c in reply.content if hasattr(c, "text")))
+    return thread, run, budget
+
+WRITE_TOOLS = {"approve_expense"}      # the set that needs a human. Keep it small and explicit.
+'''),
+md(r'''
+### Make each control fire
+
+Four runs. Each one should trip a **different** control, and the event log is the evidence.
+'''),
+code(r'''
+EVENTS.clear()
+print("--- 1. normal read: no control should fire")
+run_harnessed("What is the status of Aisha Rahman's expense report?", auto=False)
+'''),
+code(r'''
+print("--- 2. a report that does not exist: the policy refuses on the ARGUMENTS")
+run_harnessed("Approve expense report EXP-00000.", auto=True)
+print()
+print("--- 2b. a real report under the threshold: it reaches the human, who says no")
+run_harnessed("Approve expense report EXP-45445.", auto=False)
+'''),
+code(r'''
+print("--- 3. over the threshold: the POLICY refuses before any human is asked")
+run_harnessed("Approve expense report EXP-64474.", auto=True)
+'''),
+code(r'''
+print("--- 4. a task designed to loop: the step budget ends it")
+run_harnessed("Check every expense report one at a time, then check them all again, and keep going.",
+              auto=False, budget=Budget(max_steps=2))
+'''),
+code(r'''
+# The audit trail. This - not the transcript - is what you hand to an auditor.
+import collections
+print(json.dumps(EVENTS, indent=2)[:1500])
+print()
+print("event counts:", dict(collections.Counter(e["kind"] for e in EVENTS)))
+'''),
+md(r'''
+### The developer's question
+
+Look at your four runs and mark each control:
+
+| Control | Where it is enforced | Can the model talk its way past it? |
+|---|---|---|
+| Tool allow-list | harness, before the call | |
+| Amount threshold | harness policy hook | |
+| Human approval | harness + your decision | |
+| Step / token budget | harness loop | |
+| "Do not approve without checking" in the instructions | the prompt | |
+
+Only the last row is inside the model. That is the whole lesson of this session: **a control written
+into the instructions is a request; a control written into the harness is a fact.** Everything in
+the deck's Cognitive-layer table (C1–C7) sits on one side of that line or the other — and now you
+have built both kinds and watched them behave differently.
+'''),
 md('''
-## 3. Observe the trace
+## 4. Observe the trace
 
 Every run leaves steps. This is what the Foundry **Traces** tab shows as a waterfall; here it is from the API.
 '''),
@@ -395,7 +655,7 @@ md('''
 | more than 20 approvals in an hour | | |
 | jailbreak attempt detected by content filter | | |
 '''),
-md("## 4. Clean up"),
+md("## 5. Clean up"),
 code('''
 client.delete_agent(agent.id)
 print("deleted", agent.id)
@@ -468,8 +728,93 @@ except Exception as e:
 md('''
 **Exercise 4.2** — for each assignment: is it the *minimum* needed? Which one would you remove first? Which is missing (think of the three agents sharing one project)?
 '''),
+md(r'''
+## 3. Controls at build time — where each one attaches
+
+Governance fails when the control list and the build are two different documents. This section puts
+them side by side: the eight decisions you make while creating an agent, and the control that
+attaches at each one.
+
+Control IDs are from the Session 3 layer tables — **P** perception, **C** cognitive, **A** action,
+**I** integration, **O** operations, **F** infrastructure.
+
+| # | Decision when creating the agent | Controls that attach here | Enforced by |
+|---|---|---|---|
+| 1 | Which model, which version | I3 model allow-list, F4 provenance | platform |
+| 2 | The instructions you write | C1 immutable system prompt, A3 versioned prompt | **you** |
+| 3 | Which tools you attach | C7 per-task allow-list, A1 signed manifests | **you** |
+| 4 | How each tool authenticates | I1 workload identity, A1 calling-user identity, F3 no static keys | **you** |
+| 5 | Which knowledge it can reach | A2 collection ACLs, I4 row/field authorisation, C4 context as data | **you** |
+| 6 | Which actions need a human | C6 risk-tiered approval, A4 diff and blast radius, I2 MFA on approver | **you** |
+| 7 | What the budgets are | C2 step and delegation caps, O2 token and spend quotas | **you** |
+| 8 | What is recorded | O3 append-only redacted trace, O5 detections to SIEM | platform + **you** |
+
+Rows 2–7 are the developer's. Nobody else can add them later.
+'''),
+code(r'''
+# Read the controls off the agents that actually exist, rather than off the design document.
+# Each check answers one question: is this control present on this agent, right now?
+CONTROL_CHECKS = {
+    "2 instructions set":      lambda a: bool((a.instructions or "").strip()),
+    "2 grounding rule stated": lambda a: any(k in (a.instructions or "").lower() for k in
+                                             ("only from", "verbatim", "do not guess", "cite")),
+    "3 tools attached":        lambda a: len(a.tools or []) > 0,
+    "3 tool count is small":   lambda a: 0 < len(a.tools or []) <= 3,
+    "5 knowledge scoped":      lambda a: bool(getattr(a, "tool_resources", None)),
+    "6 human-approval tool":   lambda a: any(_tool_type(t) == "function" for t in (a.tools or [])),
+}
+
+def _tool_type(t):
+    return t.get("type") if isinstance(t, dict) else getattr(t, "type", "?")
+
+rows = []
+for a in client.list_agents():
+    rows.append((a.name, {k: fn(a) for k, fn in CONTROL_CHECKS.items()}))
+
+width = max(len(n) for n, _ in rows) + 2
+print("agent".ljust(width) + "  ".join(k.split()[0] + k.split()[1][:6] for k in CONTROL_CHECKS))
+for name, res in sorted(rows):
+    print(name.ljust(width) + "  ".join((" yes  " if v else " NO   ") for v in res.values()))
+'''),
+md(r'''
+**A `NO` is not automatically a finding.** A read-only agent has no write tool, so "human-approval
+tool" is correctly absent. The finding is a `NO` on an agent where the decision *should* have been
+made — and the register below is where you record which is which.
+'''),
+code(r'''
+# Rows 4 and 8 cannot be read off the agent object: they are properties of the platform around it.
+# Fill these in from what you saw in sections 1 and 2, and from Session 3's trace.
+platform_controls = {
+    "4 tool auth is managed identity, no keys":      None,   # True / False
+    "4 tool runs as the CALLING user, not the agent": None,
+    "7 step or token budget enforced outside model":  None,
+    "8 traces redacted at capture":                   None,
+    "8 trace store append-only":                      None,
+    "8 agent detections reach a SIEM":                None,
+}
+for k, v in platform_controls.items():
+    print(f"{'?' if v is None else ('yes' if v else 'NO ')}  {k}")
+'''),
+md(r'''
+### The exercise
+
+1. For every `NO` above, decide: **accepted risk**, **compensating control**, or **must fix**.
+2. For each *must fix*, write the control, where it is enforced, and who owns it.
+3. One of the rows in the second cell is **False for this architecture and cannot be fixed by
+   configuration** — find it, and say what would have to change in the design.
+
+| Finding | Decision | Control | Enforced where | Owner | Governance risk (G1–G10) |
+|---|---|---|---|---|---|
+| | | | | | |
+| | | | | | |
+| | | | | | |
+
+Map each one to a governance risk ID from the deck's register (G1 shadow agents … G10 reputational
+exposure). A finding with no G-number is a bug report; a finding with one is a governance item, and
+that is the difference this session is about.
+'''),
 md('''
-## 3. Oversight — an activity log to classify
+## 4. Oversight — an activity log to classify
 
 Below is a log built from real run steps and control-plane events of this system (names shortened). Classify every line.
 '''),
@@ -504,7 +849,7 @@ missing = [i for i in range(len(log)) if i not in decisions]
 print("\\nnot yet classified:", missing)
 '''),
 md('''
-## 4. Assurance — write the guardrail policy for these agents
+## 5. Assurance — write the guardrail policy for these agents
 
 Fill in the four layers for **this** deployment. Keep each line to what you can point at in the portal or a repo.
 
