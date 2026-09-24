@@ -31,6 +31,12 @@ if "google.colab" in sys.modules and not pathlib.Path("workshop.py").exists():
 
 SETUP = code('''
 import workshop as w
+
+# Two ways in. If the facilitator handed out a tenant/client/secret, uncomment the next line and
+# paste them at the prompt - the secret is asked for with getpass, so it is never written into a
+# cell that gets saved with the notebook. Otherwise this uses your own Entra identity.
+# w.sign_in()
+
 print("signed in as", w.whoami())
 client = w.agents_client()
 ''')

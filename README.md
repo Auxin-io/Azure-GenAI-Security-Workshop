@@ -73,6 +73,61 @@ endpoint carries on routing traffic to the deployment you just deleted. Always d
 Notebooks 01 and 03 call these endpoints and will fail with a connection error while they are down.
 Notebooks 02 and 04, and the Session 2 worksheet, do not need them.
 
+## Attendees who are not in the tenant: one shared service principal
+
+External audiences cannot `az login` to your tenant, and inviting thirty guests is worse. The
+alternative is one service principal for the room, created before and **deleted after**.
+
+```bash
+bash service_principal.sh create     # app + SP + least-privilege roles + a 2-day secret
+bash service_principal.sh show       # roles granted, and when the secret expires
+bash service_principal.sh rotate     # new secret, same principal
+bash service_principal.sh delete     # removes the SP, its role assignments and the custom role
+```
+
+Run it **after** `endpoints.sh up`, so the endpoints exist and can be granted; re-running `create`
+is safe and picks up anything that was missing.
+
+Attendees uncomment one line in the setup cell of any notebook:
+
+```python
+w.sign_in()      # prompts for tenant / client id / secret; the secret uses getpass
+```
+
+### What the principal can do, and what it deliberately cannot
+
+| Granted | Scope | Why |
+|---|---|---|
+| `Azure AI User` | the AI Services account | create and delete agents, threads, files, vector stores |
+| **`GenAI Workshop Endpoint Scorer`** (custom) | each online endpoint | `onlineEndpoints/read` + `onlineEndpoints/score/action` — nothing else |
+| `Reader` on the resource group | opt-in, `--with-reader` | only notebook 4's RBAC cell, which needs the az CLI and so cannot run in Colab anyway |
+
+The custom role exists because the obvious choice is wrong. **`AzureML Data Scientist`** — what the
+older instructions used — grants `workspaces/*/write` and `workspaces/*/delete`. Even scoped to a
+single endpoint, that lets any attendee **delete the endpoint** and end the session for everyone.
+Scoring needs read and score, so the custom role has read and score.
+
+### Say this to the room
+
+A shared principal means **no attribution** — every action in the audit log is the same identity —
+**no per-attendee revocation**, and any attendee can delete another's agents. `w.sign_in()` prints
+that warning on purpose. It is the same finding Session 4 asks the room to write down about the
+three demo agents sharing one identity, except now they are living inside it. Use the coincidence.
+
+Because everyone shares an identity, `sample_alias()` cannot derive a name from the sign-in, so it
+asks each attendee for a short name once and remembers it for the session. Without that, thirty
+people create `architect-agent-<same-appid>` and overwrite each other.
+
+### After the session
+
+```bash
+bash service_principal.sh delete
+bash endpoints.sh down
+```
+
+Both verify afterwards. If the secret leaks before then, `rotate` invalidates nothing on its own —
+`--append` adds a credential rather than replacing it, so `delete` is the reliable answer.
+
 ## Facilitator setup (once, before the workshop)
 
 Attendees need two data-plane roles. Put them in a group and grant the group:
@@ -134,7 +189,11 @@ for s in c.vector_stores.list():
 ## Files
 
 ```
-workshop.py            helpers: credential, score(), agents_client(), ask(), describe_steps()
+workshop.py            helpers: credential, sign_in(), score(), agents_client(), ask(), describe_steps(),
+                       openapi_spec(), build_vector_store(), sample_alias()
+endpoints.sh           bring the two ML endpoints up before a session and down after
+service_principal.sh   one least-privilege SP for attendees outside the tenant; delete after
+session2-threat-model-worksheet.md   the Session 2 paper exercise (+ facilitator notes)
 build_notebooks.py     source of the four notebooks
 run_notebook.py        executes a notebook's code cells without Jupyter (verification)
 0[1-4]_*.ipynb         the sessions

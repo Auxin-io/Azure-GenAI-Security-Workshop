@@ -44,10 +44,41 @@ _cred = None
 IN_COLAB = "google.colab" in sys.modules or os.environ.get("WORKSHOP_DEVICE_LOGIN") == "1"
 
 
+def sign_in(tenant_id: str = "", client_id: str = "", client_secret: str = "") -> None:
+    """Use a workshop service principal instead of your own identity.
+
+    Call this before anything else when the facilitator handed out three values. Prefer passing
+    nothing and letting it prompt: a secret typed into a cell is saved with the notebook, and a
+    notebook with a live secret in it is the thing everyone forgets to clean up.
+    """
+    import getpass
+    tenant_id = tenant_id or os.environ.get("AZURE_TENANT_ID") or input("AZURE_TENANT_ID: ").strip()
+    client_id = client_id or os.environ.get("AZURE_CLIENT_ID") or input("AZURE_CLIENT_ID: ").strip()
+    client_secret = (client_secret or os.environ.get("AZURE_CLIENT_SECRET")
+                     or getpass.getpass("AZURE_CLIENT_SECRET (hidden): ").strip())
+
+    global _cred
+    from azure.identity import ClientSecretCredential
+    _cred = ClientSecretCredential(tenant_id, client_id, client_secret)
+    CONFIG["tenant_id"] = tenant_id
+    _cred.get_token(ML_SCOPE)                      # fail here, with a clear error, not mid-exercise
+    print("signed in as the workshop service principal")
+    print("NOTE: everyone in the room shares this identity. Your agents are visible to, and "
+          "deletable by, everyone else - and nothing you do is attributable to you. "
+          "Session 4 asks you to write that down as a finding.")
+
+
 def credential():
     global _cred
     if _cred is None:
-        if IN_COLAB:
+        # A service principal supplied by environment is used without prompting: that is how the
+        # facilitator's own dry-run (run_notebook.py) authenticates in CI.
+        if os.environ.get("AZURE_CLIENT_SECRET") and os.environ.get("AZURE_CLIENT_ID"):
+            from azure.identity import ClientSecretCredential
+            _cred = ClientSecretCredential(os.environ.get("AZURE_TENANT_ID", CONFIG["tenant_id"]),
+                                           os.environ["AZURE_CLIENT_ID"],
+                                           os.environ["AZURE_CLIENT_SECRET"])
+        elif IN_COLAB:
             _cred = DeviceCodeCredential(tenant_id=CONFIG["tenant_id"])
         else:
             _cred = ChainedTokenCredential(AzureCliCredential(), InteractiveBrowserCredential())
@@ -139,10 +170,42 @@ def describe_steps(turn: Turn) -> None:
             print(f"{i}. {s.type}")
 
 
+_alias = None
+
+
 def sample_alias() -> str:
-    """A short per-attendee suffix so everyone's agents and stores have unique names."""
-    user = whoami().split("@")[0]
-    return "".join(c for c in user if c.isalnum())[:16].lower() or "attendee"
+    """A short per-attendee suffix so everyone's agents and stores have unique names.
+
+    Normally this is your sign-in name. On a shared service principal it cannot be: whoami()
+    returns the same appid for the whole room, so thirty people would create one agent name and
+    overwrite each other's work. In that case ask once, remember the answer for the session, and
+    fall back to a random suffix if there is nobody to ask (a scripted dry-run).
+    """
+    global _alias
+    if _alias:
+        return _alias
+
+    def clean(text):
+        return "".join(c for c in text if c.isalnum())[:16].lower()
+
+    who = whoami()
+    if "@" in who:                                    # a real user: name@tenant
+        _alias = clean(who.split("@")[0]) or "attendee"
+        return _alias
+
+    env = os.environ.get("WORKSHOP_ALIAS")
+    if env:
+        _alias = clean(env) or "attendee"
+        return _alias
+    try:
+        _alias = clean(input("Shared login detected. Pick a short name for your agents: ")) or None
+    except (EOFError, OSError):
+        _alias = None
+    if not _alias:
+        import random
+        _alias = "anon" + "".join(random.choice("0123456789abcdef") for _ in range(4))
+        print(f"using {_alias}")
+    return _alias
 
 # ------------------------------------------------------------------ building your own agent
 OPERATION = {
