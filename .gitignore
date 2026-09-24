@@ -2,3 +2,7 @@ __pycache__/
 .venv*/
 data/poison/
 .ipynb_checkpoints/
+
+# workshop service principal credentials - never commit
+sp-credentials.txt
+*.secret
