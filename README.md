@@ -73,6 +73,79 @@ endpoint carries on routing traffic to the deployment you just deleted. Always d
 Notebooks 01 and 03 call these endpoints and will fail with a connection error while they are down.
 Notebooks 02 and 04, and the Session 2 worksheet, do not need them.
 
+## Fallback: borrowing an existing app registration
+
+This tenant sets `allowedToCreateApps: false` and this account holds no Entra directory role, so
+`service_principal.sh` cannot run. The fallback is to borrow an app registration the account
+already owns - `azure-scan`.
+
+**Know what this costs before doing it.** A client secret *is* the application; Azure has no
+scoped-down credential. Everyone who receives it inherits everything `azure-scan` can do:
+
+| | |
+|---|---|
+| `Contributor` | resource group `alphascale` |
+| `Virtual Machine Contributor` | `VDI_ResourceGroup` |
+| `Directory.Read.All` | every user, group and app in the tenant |
+| `Policy.Read.All` | organisation policies |
+
+It is also the identity behind the **`vm shutdown`** and **`backup`** jobs, so an attendee's actions
+and that automation are indistinguishable in the audit log. Prefer the Application Developer route
+above if it is available at all; this is a same-day arrangement, not a setup.
+
+### Issue the credential (you run this, not a script)
+
+Deliberately manual: the secret is created by a person, so it never lands in a script, a log or a
+terminal transcript.
+
+```bash
+APP=ad2f64f3-e752-4396-958f-2888095c65e1          # azure-scan
+SP=884b617f-c2cc-4a32-8437-1a0fb5bec79e           # its service principal
+RG=docintel-ml-rg
+AIS=$(az cognitiveservices account list -g $RG --query "[?kind=='AIServices'].id | [0]" -o tsv)
+
+# 1. Foundry access, so the notebooks can manage agents and vector stores
+az role assignment create --assignee-object-id $SP --assignee-principal-type ServicePrincipal   --role 53ca6127-db72-4b80-b1b0-d745d6d5456d --scope "$AIS"
+
+# 2. Scoring on the two endpoints - only after `bash endpoints.sh up`
+WS=$(az ml workspace list -g $RG --query "[0].name" -o tsv)
+for E in docintel-qwen employee-from-scratch; do
+  az role assignment create --assignee-object-id $SP --assignee-principal-type ServicePrincipal     --role "GenAI Workshop Endpoint Scorer"     --scope $(az ml online-endpoint show -n $E -g $RG -w $WS --query id -o tsv)
+done
+
+# 3. A 12-hour secret. --append is not optional: without it, `credential reset` DELETES every
+#    existing password on the app and breaks vm shutdown and backup immediately.
+END=$(python -c "import datetime;print((datetime.datetime.utcnow()+datetime.timedelta(hours=12)).strftime('%Y-%m-%dT%H:%M:%SZ'))")
+az ad app credential reset --id $APP --append --display-name workshop-temporary --end-date "$END"
+```
+
+The custom role in step 2 has to exist first. Create it once:
+
+```bash
+SUB=$(az account show --query id -o tsv)
+cat > /tmp/scorer.json <<JSON
+{"Name":"GenAI Workshop Endpoint Scorer",
+ "Description":"Read and score the workshop endpoints.",
+ "Actions":["Microsoft.MachineLearningServices/workspaces/onlineEndpoints/read",
+            "Microsoft.MachineLearningServices/workspaces/onlineEndpoints/score/action"],
+ "NotActions":[],"AssignableScopes":["/subscriptions/$SUB"]}
+JSON
+az role definition create --role-definition /tmp/scorer.json && rm /tmp/scorer.json
+```
+
+Give attendees the tenant id, `$APP` as the client id, and the `password` from step 3.
+
+### Revoke it the same day
+
+```bash
+bash revoke_workshop_credential.sh show      # what is on the app right now
+bash revoke_workshop_credential.sh revoke    # remove the credential and the workshop roles
+```
+
+It matches the credential by display name (`workshop-temporary`), so `vm shutdown` and `backup` are
+never touched, and it prints the app's remaining credentials and roles afterwards so you can see
+the state it left behind rather than assume it.
+
 ## Attendees who are not in the tenant: one shared service principal
 
 External audiences cannot `az login` to your tenant, and inviting thirty guests is worse. The
@@ -193,6 +266,7 @@ workshop.py            helpers: credential, sign_in(), score(), agents_client(),
                        openapi_spec(), build_vector_store(), sample_alias()
 endpoints.sh           bring the two ML endpoints up before a session and down after
 service_principal.sh   one least-privilege SP for attendees outside the tenant; delete after
+revoke_workshop_credential.sh   removes a borrowed app's workshop credential and roles
 session2-threat-model-worksheet.md   the Session 2 paper exercise (+ facilitator notes)
 build_notebooks.py     source of the four notebooks
 run_notebook.py        executes a notebook's code cells without Jupyter (verification)

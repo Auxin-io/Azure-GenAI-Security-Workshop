@@ -6,3 +6,5 @@ data/poison/
 # workshop service principal credentials - never commit
 sp-credentials.txt
 *.secret
+
+.workshop-credential
