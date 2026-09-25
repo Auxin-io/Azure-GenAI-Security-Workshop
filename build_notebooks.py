@@ -26,7 +26,9 @@ if "google.colab" in sys.modules and not pathlib.Path("workshop.py").exists():
     subprocess.run([sys.executable, "-m", "pip", "install", "-q", "azure-ai-projects>=2", "azure-ai-agents>=1.1", "azure-identity>=1.17"], check=True)
     subprocess.run(["git", "clone", "-q", "https://github.com/Auxin-io/Azure-GenAI-Security-Workshop.git", "_ws"], check=True)
     subprocess.run("cp -r _ws/workshop.py _ws/data . ", shell=True, check=True)
-    print("Colab setup done - a device-code sign-in prompt will appear in the next cell")
+    print("Colab setup done - a device-code sign-in prompt will appear in the next cell.")
+    print("If the facilitator gave you a hosted workshop link, use that instead: it signs in")
+    print("for you with a managed identity and needs no Azure account at all.")
 ''')
 
 SETUP = code('''
