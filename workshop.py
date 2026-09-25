@@ -110,8 +110,23 @@ def score(which: str, question: str, **extra) -> dict:
         CONFIG["endpoints"][which], data=json.dumps(body).encode(),
         headers={"Authorization": f"Bearer {credential().get_token(ML_SCOPE).token}",
                  "Content-Type": "application/json"})
-    with urllib.request.urlopen(req, timeout=120) as r:
-        return json.loads(r.read())
+    try:
+        with urllib.request.urlopen(req, timeout=120) as r:
+            return json.loads(r.read())
+    except urllib.error.URLError as e:
+        # The endpoints are created before a session and deleted after, so the common failure is
+        # that they are simply not running. Azure publishes the DNS name only while the endpoint
+        # exists, so the symptom is a name-resolution error - which reads like a broken network
+        # and is not one. Say what it actually is.
+        if isinstance(getattr(e, "reason", None), OSError) and "not known" in str(e.reason):
+            url = CONFIG["endpoints"][which]
+            raise RuntimeError(
+                f"The {which!r} endpoint is not running, so its hostname does not resolve."
+                f"\n  tried: {url}"
+                "\n  Ask the facilitator to run: bash endpoints.sh up  (20-30 min)"
+                "\n  Notebooks 02 and 04 need no endpoints and work meanwhile."
+            ) from None
+        raise
 
 
 # ------------------------------------------------------------------ agents
