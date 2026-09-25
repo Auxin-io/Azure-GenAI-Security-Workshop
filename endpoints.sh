@@ -16,6 +16,8 @@
 set -euo pipefail
 
 RG=${RG:-docintel-ml-rg}
+MI_NAME=${MI_NAME:-workshop-notebook-mi}                # the notebook host's identity
+SCORER_ROLE=${SCORER_ROLE:-"GenAI Workshop Endpoint Scorer"}
 WS=${WS:-$(az ml workspace list -g "$RG" --query "[0].name" -o tsv | tr -d '\r')}
 ROOT=${ROOT:-$(cd "$(dirname "$0")/.." && pwd)}      # the folder holding the Azure-* repos
 
@@ -71,6 +73,22 @@ case "${1:-}" in
         echo "           update CONFIG[\"endpoints\"] in workshop.py or every notebook fails"
       fi
     done
+    # Endpoints are recreated every session, so their role assignments are too. Without this the
+    # notebooks get a valid token and a 403, which reads like a network fault and is not one.
+    MI_OID=$(az identity show -g "$RG" -n "$MI_NAME" --query principalId -o tsv \
+             2>/dev/null | tr -d '\r' || true)
+    if [ -n "$MI_OID" ]; then
+      for e in docintel-qwen employee-from-scratch; do
+        scope=$(az ml online-endpoint show -n "$e" -g "$RG" -w "$WS" --query id -o tsv | tr -d '\r')
+        MSYS_NO_PATHCONV=1 az role assignment create --assignee-object-id "$MI_OID" \
+          --assignee-principal-type ServicePrincipal --role "$SCORER_ROLE" \
+          --scope "$scope" -o none 2>/dev/null \
+          && echo "  $MI_NAME can score $e" || echo "  (scoring role on $e already present)"
+      done
+    else
+      echo "  no managed identity '$MI_NAME' - skipping the notebook-host grant"
+    fi
+
     echo
     echo "Grant the attendee group scoring rights (see README, facilitator setup), then smoke-test:"
     echo "  python -c \"import workshop as w; print(w.score('finance','How much do we owe Xenon Energy?'))\""
