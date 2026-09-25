@@ -118,7 +118,10 @@ def score(which: str, question: str, **extra) -> dict:
         # that they are simply not running. Azure publishes the DNS name only while the endpoint
         # exists, so the symptom is a name-resolution error - which reads like a broken network
         # and is not one. Say what it actually is.
-        if isinstance(getattr(e, "reason", None), OSError) and "not known" in str(e.reason):
+        # Match the exception TYPE, not its text: Linux says "Name or service not known"
+        # and Windows says "getaddrinfo failed", and attendees are on both.
+        import socket
+        if isinstance(getattr(e, "reason", None), socket.gaierror):
             url = CONFIG["endpoints"][which]
             raise RuntimeError(
                 f"The {which!r} endpoint is not running, so its hostname does not resolve."
