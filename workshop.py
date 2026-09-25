@@ -81,7 +81,16 @@ def credential():
         elif IN_COLAB:
             _cred = DeviceCodeCredential(tenant_id=CONFIG["tenant_id"])
         else:
-            _cred = ChainedTokenCredential(AzureCliCredential(), InteractiveBrowserCredential())
+            # On the workshop notebook host, AZURE_CLIENT_ID names a user-assigned managed
+            # identity and there is no secret anywhere - the platform hands out the token. Try it
+            # first and let the chain fall through, so the same code still works on a laptop with
+            # `az login` and nothing set.
+            chain = []
+            if os.environ.get("AZURE_CLIENT_ID"):
+                from azure.identity import ManagedIdentityCredential
+                chain.append(ManagedIdentityCredential(client_id=os.environ["AZURE_CLIENT_ID"]))
+            chain += [AzureCliCredential(), InteractiveBrowserCredential()]
+            _cred = ChainedTokenCredential(*chain)
     return _cred
 
 
