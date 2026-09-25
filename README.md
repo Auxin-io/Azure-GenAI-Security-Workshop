@@ -51,6 +51,12 @@ What you can and cannot do: you can call the endpoints, run the shared agents, a
 
 ---
 
+> **Facilitator scripts are not in this repository.** `endpoints.sh`, `service_principal.sh`,
+> `revoke_workshop_credential.sh`, `host/` and `build_notebooks.py` live on the facilitator's
+> machine only. Attendees clone this repo - the Colab bootstrap does, and so does the notebook
+> host at boot - so it carries only what an attendee needs. The commands below are documented
+> here for the facilitator, who has those files locally.
+
 ## Before and after every session: the endpoints
 
 The two Azure ML endpoints are **not** left running. The finance one is a `Standard_NC4as_T4_v3`

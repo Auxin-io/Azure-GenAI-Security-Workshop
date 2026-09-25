@@ -8,3 +8,14 @@ sp-credentials.txt
 *.secret
 
 .workshop-credential
+
+# Facilitator tooling - kept on the facilitator's machine, not published.
+# Attendees clone this repo (Colab bootstrap, and the notebook host at boot), so it
+# holds only what an attendee needs: the notebooks, workshop.py, data/ and the worksheet.
+host/
+docs/
+build_notebooks.py
+run_notebook.py
+endpoints.sh
+service_principal.sh
+revoke_workshop_credential.sh
