@@ -68,6 +68,17 @@ def _silent_credentials():
     return out
 
 
+def _try_silent():
+    """First credential that works without prompting, or None."""
+    for cand in _silent_credentials():
+        try:
+            cand.get_token(ML_SCOPE)
+            return cand
+        except Exception:
+            continue
+    return None
+
+
 def sign_in(tenant_id: str = "", client_id: str = "", client_secret: str = "") -> None:
     """Get a credential without anyone running a script or opening a login page.
 
@@ -83,14 +94,21 @@ def sign_in(tenant_id: str = "", client_id: str = "", client_secret: str = "") -
     global _cred
 
     if not (client_secret or os.environ.get("AZURE_CLIENT_SECRET")):
-        for cand in _silent_credentials():
-            try:
-                cand.get_token(ML_SCOPE)
-                _cred = cand
-                print("signed in as", whoami(), "- nothing needed from you here")
-                return
-            except Exception:
-                continue
+        # Probing is expected to fail on the way to the prompt - in Colab there is no CLI and no
+        # managed identity. azure-identity logs each failure at WARNING, which looks like a fault
+        # and is not one, so quieten it for the duration of the probe only.
+        import logging
+        idlog = logging.getLogger("azure.identity")
+        was = idlog.level
+        idlog.setLevel(logging.ERROR)
+        try:
+            _cred_from_probe = _try_silent()
+        finally:
+            idlog.setLevel(was)
+        if _cred_from_probe is not None:
+            _cred = _cred_from_probe
+            print("signed in as", whoami(), "- nothing needed from you here")
+            return
 
     tenant_id = tenant_id or os.environ.get("AZURE_TENANT_ID") or CONFIG["tenant_id"]
     client_id = client_id or os.environ.get("AZURE_CLIENT_ID") or CONFIG["workshop_client_id"]
