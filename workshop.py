@@ -47,29 +47,50 @@ _cred = None
 IN_COLAB = "google.colab" in sys.modules or os.environ.get("WORKSHOP_DEVICE_LOGIN") == "1"
 
 
+def _silent_credentials():
+    """Credentials that can be TRIED without prompting anybody.
+
+    DeviceCodeCredential and InteractiveBrowserCredential are deliberately excluded: calling
+    get_token on either one starts an interactive sign-in, so using them to probe is the same
+    thing as demanding a login - which is precisely what this function exists to avoid.
+    """
+    out = []
+    if os.environ.get("AZURE_CLIENT_ID"):
+        try:
+            from azure.identity import ManagedIdentityCredential
+            out.append(ManagedIdentityCredential(client_id=os.environ["AZURE_CLIENT_ID"]))
+        except Exception:
+            pass
+    try:
+        out.append(AzureCliCredential())
+    except Exception:
+        pass
+    return out
+
+
 def sign_in(tenant_id: str = "", client_id: str = "", client_secret: str = "") -> None:
-    """Get a credential without anyone running a script.
+    """Get a credential without anyone running a script or opening a login page.
 
-    Order of preference, so the same cell works everywhere:
-      1. something already available - the notebook host's managed identity, or `az login`
-      2. AZURE_* environment variables
-      3. the workshop secret, typed once at a getpass prompt (this is the Colab path)
+    Order, so one cell works everywhere:
+      1. a secret passed in or already in the environment
+      2. something non-interactive that is already here - the host's managed identity, or az login
+      3. the workshop secret, typed once at a hidden prompt (the Colab path)
 
-    Only the secret is ever asked for: the tenant and the app's client id are in CONFIG because
-    neither is a credential. getpass keeps the secret out of the saved notebook.
+    Only the secret is ever asked for. The tenant and the app's client id live in CONFIG because
+    neither is a credential, and getpass keeps the secret out of the saved notebook.
     """
     import getpass
     global _cred
 
     if not (client_secret or os.environ.get("AZURE_CLIENT_SECRET")):
-        # Try what is already here before asking anyone for anything.
-        try:
-            probe = credential()
-            probe.get_token(ML_SCOPE)
-            print("signed in as", whoami(), "- no secret needed here")
-            return
-        except Exception:
-            _cred = None                      # nothing usable; fall through and ask
+        for cand in _silent_credentials():
+            try:
+                cand.get_token(ML_SCOPE)
+                _cred = cand
+                print("signed in as", whoami(), "- nothing needed from you here")
+                return
+            except Exception:
+                continue
 
     tenant_id = tenant_id or os.environ.get("AZURE_TENANT_ID") or CONFIG["tenant_id"]
     client_id = client_id or os.environ.get("AZURE_CLIENT_ID") or CONFIG["workshop_client_id"]
