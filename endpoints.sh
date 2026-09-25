@@ -16,7 +16,8 @@
 set -euo pipefail
 
 RG=${RG:-docintel-ml-rg}
-MI_NAME=${MI_NAME:-workshop-notebook-mi}                # the notebook host's identity
+MI_NAME=${MI_NAME:-workshop-notebook-mi}
+AIS_NAME=${AIS_NAME:-docintel-ais-dggcb4}                # the notebook host's identity
 SCORER_ROLE=${SCORER_ROLE:-"GenAI Workshop Endpoint Scorer"}
 WS=${WS:-$(az ml workspace list -g "$RG" --query "[0].name" -o tsv | tr -d '\r')}
 ROOT=${ROOT:-$(cd "$(dirname "$0")/.." && pwd)}      # the folder holding the Azure-* repos
@@ -86,7 +87,25 @@ case "${1:-}" in
           && echo "  $MI_NAME can score $e" || echo "  (scoring role on $e already present)"
       done
     else
-      echo "  no managed identity '$MI_NAME' - skipping the notebook-host grant"
+      echo "  no managed identity $MI_NAME - skipping the notebook-host grant"
+    fi
+
+    # The Foundry agents call these endpoints through an OpenAPI tool, using the AI Services
+    # account's own managed identity. That grant is scoped to the endpoint, so deleting the
+    # endpoint destroys it - and every up/down cycle would otherwise leave the agents with a 403
+    # that surfaces in a notebook as a failed run with no message at all.
+    AIS_OID=$(az cognitiveservices account show -n "$AIS_NAME" -g "$RG" \
+              --query identity.principalId -o tsv 2>/dev/null | tr -d '\r' || true)
+    if [ -n "$AIS_OID" ]; then
+      for e in docintel-qwen employee-from-scratch; do
+        scope=$(az ml online-endpoint show -n "$e" -g "$RG" -w "$WS" --query id -o tsv | tr -d '\r')
+        MSYS_NO_PATHCONV=1 az role assignment create --assignee-object-id "$AIS_OID" \
+          --assignee-principal-type ServicePrincipal --role "AzureML Data Scientist" \
+          --scope "$scope" -o none 2>/dev/null \
+          && echo "  Foundry agents can call $e" || echo "  (Foundry grant on $e already present)"
+      done
+    else
+      echo "  WARNING: could not find the AI Services identity - the agents will 403 on tool calls"
     fi
 
     echo

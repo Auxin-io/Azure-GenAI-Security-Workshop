@@ -450,7 +450,16 @@ def run_guarded(question, thread=None, auto=None):
                         print("     DENIED")
                     outputs.append(ToolOutput(tool_call_id=call.id, output=result))
             run = client.runs.submit_tool_outputs(thread_id=thread.id, run_id=run.id, tool_outputs=outputs)
-    reply = next(m for m in client.messages.list(thread_id=thread.id) if m.role == "assistant")
+    # A run that fails leaves no assistant message, so reaching for one blows up with a bare
+    # StopIteration and hides the actual cause - usually a 403 on a tool call.
+    reply = next((m for m in client.messages.list(thread_id=thread.id) if m.role == "assistant"), None)
+    if reply is None:
+        print(f"A  <no answer: run {run.status}>")
+        if getattr(run, "last_error", None):
+            print("   reason:", run.last_error)
+        print("   If this is a permissions error, the endpoints were probably recreated and the")
+        print("   agents' identity lost its scoring role. Facilitator: re-run bash endpoints.sh up")
+        return thread, run
     text = "".join(getattr(c, "text").value for c in reply.content if hasattr(c, "text"))
     print("A ", text, f"  [run {run.status}]")
     return thread, run
