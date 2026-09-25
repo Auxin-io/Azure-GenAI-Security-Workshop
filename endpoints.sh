@@ -16,7 +16,7 @@
 set -euo pipefail
 
 RG=${RG:-docintel-ml-rg}
-WS=${WS:-$(az ml workspace list -g "$RG" --query "[0].name" -o tsv)}
+WS=${WS:-$(az ml workspace list -g "$RG" --query "[0].name" -o tsv | tr -d '\r')}
 ROOT=${ROOT:-$(cd "$(dirname "$0")/.." && pwd)}      # the folder holding the Azure-* repos
 
 FINANCE_DIR="$ROOT/Azure-FineTuning-Foundry-Agent/serving"
@@ -27,7 +27,7 @@ usage() { sed -n '2,12p' "$0"; exit 1; }
 status() {
   echo "workspace: $WS"
   local eps
-  eps=$(az ml online-endpoint list -g "$RG" -w "$WS" --query "[].name" -o tsv)
+  eps=$(az ml online-endpoint list -g "$RG" -w "$WS" --query "[].name" -o tsv | tr -d '\r')
   if [ -z "$eps" ]; then
     echo "  no online endpoints - nothing is billing"
     return
@@ -63,7 +63,7 @@ case "${1:-}" in
     # workshop.py hardcodes the scoring URIs. If a recreated endpoint lands on a different region
     # or suffix, every notebook fails with a connection error and the cause is not obvious.
     for e in docintel-qwen employee-from-scratch; do
-      uri=$(az ml online-endpoint show -n "$e" -g "$RG" -w "$WS" --query scoring_uri -o tsv)
+      uri=$(az ml online-endpoint show -n "$e" -g "$RG" -w "$WS" --query scoring_uri -o tsv | tr -d '\r')
       if grep -q "$uri" "$(dirname "$0")/workshop.py"; then
         echo "  $e scoring_uri matches workshop.py"
       else

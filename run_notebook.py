@@ -7,6 +7,15 @@ import sys
 import traceback
 from pathlib import Path
 
+# Foundry answers carry citation markers in CJK brackets. A Windows console defaults to
+# cp1252 and dies on them, which looks like a notebook bug and is not one - Colab and
+# Jupyter are both UTF-8.
+for stream in (sys.stdout, sys.stderr):
+    try:
+        stream.reconfigure(encoding='utf-8', errors='replace')
+    except (AttributeError, ValueError):
+        pass
+
 path = Path(sys.argv[1])
 cells = [c for c in json.loads(path.read_text(encoding="utf-8"))["cells"] if c["cell_type"] == "code"]
 ns = {}

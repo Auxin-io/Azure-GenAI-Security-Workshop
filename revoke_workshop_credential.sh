@@ -23,7 +23,7 @@ CRED_NAME=${CRED_NAME:-workshop-temporary}
 AI_USER_ROLE=53ca6127-db72-4b80-b1b0-d745d6d5456d          # Azure AI User
 SCORER_ROLE=${SCORER_ROLE:-"GenAI Workshop Endpoint Scorer"}
 
-WS=$(az ml workspace list -g "$RG" --query "[0].name" -o tsv 2>/dev/null || true)
+WS=$(az ml workspace list -g "$RG" --query "[0].name" -o tsv 2>/dev/null | tr -d '\r' || true)
 
 endpoint_scopes() {
   [ -z "$WS" ] && return 0
@@ -47,7 +47,7 @@ case "${1:-show}" in
 
   revoke)
     FOUND=$(az ad app credential list --id "$APP" \
-            --query "[?displayName=='$CRED_NAME'].keyId" -o tsv)
+            --query "[?displayName=='$CRED_NAME'].keyId" -o tsv | tr -d '\r')
     if [ -z "$FOUND" ]; then
       echo "no credential named '$CRED_NAME' on this app"
     else
@@ -58,7 +58,7 @@ case "${1:-show}" in
     fi
 
     echo "removing workshop role assignments"
-    AIS=$(az cognitiveservices account list -g "$RG" --query "[?kind=='AIServices'].id | [0]" -o tsv)
+    AIS=$(az cognitiveservices account list -g "$RG" --query "[?kind=='AIServices'].id | [0]" -o tsv | tr -d '\r')
     MSYS_NO_PATHCONV=1 az role assignment delete --assignee "$APP" --role "$AI_USER_ROLE" \
       --scope "$AIS" -o none 2>/dev/null || echo "  (Azure AI User assignment not present)"
     for scope in $(endpoint_scopes); do

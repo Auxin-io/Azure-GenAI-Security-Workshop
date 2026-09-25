@@ -380,7 +380,7 @@ COLAB,
 SETUP,
 md("## 1. Build the agent with a read tool and a write tool"),
 code('''
-import json, yaml
+import json
 from azure.ai.agents.models import (FunctionTool, OpenApiTool, OpenApiManagedAuthDetails,
                                     OpenApiManagedSecurityScheme, ToolSet, RequiredFunctionToolCall, ToolOutput)
 
@@ -605,15 +605,20 @@ run_harnessed("Approve expense report EXP-00000.", auto=True)
 print()
 print("--- 2b. a real report under the threshold: it reaches the human, who says no")
 run_harnessed("Approve expense report EXP-45445.", auto=False)
+print()
+print("--- 2c. the same report, approved this time: policy passed it, the human allowed it")
+run_harnessed("Approve expense report EXP-45445.", auto=True)
 '''),
 code(r'''
 print("--- 3. over the threshold: the POLICY refuses before any human is asked")
 run_harnessed("Approve expense report EXP-64474.", auto=True)
 '''),
 code(r'''
-print("--- 4. a task designed to loop: the step budget ends it")
-run_harnessed("Check every expense report one at a time, then check them all again, and keep going.",
-              auto=False, budget=Budget(max_steps=2))
+print("--- 4. several writes in one turn: the step budget ends it after the first")
+# Only FUNCTION tool calls reach this harness - askEmployeeModel runs server-side inside Foundry -
+# so a budget demo has to ask for repeated writes, not repeated reads.
+run_harnessed("Approve expense reports EXP-45445, then EXP-87838, then EXP-64474, one at a time.",
+              auto=True, budget=Budget(max_steps=1))
 '''),
 code(r'''
 # The audit trail. This - not the transcript - is what you hand to an auditor.
@@ -777,10 +782,14 @@ rows = []
 for a in client.list_agents():
     rows.append((a.name, {k: fn(a) for k, fn in CONTROL_CHECKS.items()}))
 
+labels = list(CONTROL_CHECKS)
 width = max(len(n) for n, _ in rows) + 2
-print("agent".ljust(width) + "  ".join(k.split()[0] + k.split()[1][:6] for k in CONTROL_CHECKS))
+print("agent".ljust(width) + "".join(f"{i:^7}" for i in range(1, len(labels) + 1)))
 for name, res in sorted(rows):
-    print(name.ljust(width) + "  ".join((" yes  " if v else " NO   ") for v in res.values()))
+    print(name.ljust(width) + "".join(f"{('yes' if v else 'NO'):^7}" for v in res.values()))
+print()
+for i, l in enumerate(labels, 1):
+    print(f"  {i}. {l}")
 '''),
 md(r'''
 **A `NO` is not automatically a finding.** A read-only agent has no write tool, so "human-approval

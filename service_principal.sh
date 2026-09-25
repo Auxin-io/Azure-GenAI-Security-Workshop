@@ -45,9 +45,9 @@ SCORER_ROLE=${SCORER_ROLE:-"GenAI Workshop Endpoint Scorer"}
 WITH_READER=0
 [ "${2:-}" = "--with-reader" ] && WITH_READER=1
 
-WS=$(az ml workspace list -g "$RG" --query "[0].name" -o tsv 2>/dev/null || true)
-SUB=$(az account show --query id -o tsv)
-TENANT=$(az account show --query tenantId -o tsv)
+WS=$(az ml workspace list -g "$RG" --query "[0].name" -o tsv 2>/dev/null | tr -d '\r' || true)
+SUB=$(az account show --query id -o tsv | tr -d '\r')
+TENANT=$(az account show --query tenantId -o tsv | tr -d '\r')
 
 app_id()  { az ad app list --display-name "$APP_NAME" --query "[0].appId" -o tsv 2>/dev/null; }
 sp_oid()  { az ad sp show --id "$1" --query id -o tsv 2>/dev/null; }
@@ -90,7 +90,7 @@ JSON
 
 assign() {                                   # assign <sp-object-id>
   local oid=$1 ais_scope eps
-  ais_scope=$(az cognitiveservices account list -g "$RG" --query "[?kind=='AIServices'].id | [0]" -o tsv)
+  ais_scope=$(az cognitiveservices account list -g "$RG" --query "[?kind=='AIServices'].id | [0]" -o tsv | tr -d '\r')
 
   MSYS_NO_PATHCONV=1 az role assignment create --assignee-object-id "$oid" \
     --assignee-principal-type ServicePrincipal --role "$AI_USER_ROLE" --scope "$ais_scope" -o none
@@ -114,7 +114,7 @@ assign() {                                   # assign <sp-object-id>
   if [ "$WITH_READER" = "1" ]; then
     MSYS_NO_PATHCONV=1 az role assignment create --assignee-object-id "$oid" \
       --assignee-principal-type ServicePrincipal --role Reader \
-      --scope "$(az group show -n "$RG" --query id -o tsv)" -o none
+      --scope "$(az group show -n "$RG" --query id -o tsv | tr -d '\r')" -o none
     echo "  Reader on the resource group (notebook 4, local only)"
   fi
 }
@@ -124,7 +124,7 @@ case "${1:-}" in
     APP=$(app_id)
     if [ -z "$APP" ]; then
       echo "creating app registration $APP_NAME"
-      APP=$(az ad app create --display-name "$APP_NAME" --query appId -o tsv)
+      APP=$(az ad app create --display-name "$APP_NAME" --query appId -o tsv | tr -d '\r')
       az ad sp create --id "$APP" -o none
       sleep 10                                  # the SP is not immediately visible to RBAC
     else
@@ -137,7 +137,7 @@ case "${1:-}" in
 
     END=$(python -c "import datetime;print((datetime.datetime.utcnow()+datetime.timedelta(days=$SECRET_DAYS)).strftime('%Y-%m-%dT%H:%M:%SZ'))")
     SECRET=$(az ad app credential reset --id "$APP" --append --display-name workshop \
-             --end-date "$END" --query password -o tsv)
+             --end-date "$END" --query password -o tsv | tr -d '\r')
 
     cat <<EOF
 
@@ -175,7 +175,7 @@ EOF
     APP=$(app_id); [ -z "$APP" ] && { echo "no app named $APP_NAME - run create"; exit 1; }
     END=$(python -c "import datetime;print((datetime.datetime.utcnow()+datetime.timedelta(days=$SECRET_DAYS)).strftime('%Y-%m-%dT%H:%M:%SZ'))")
     SECRET=$(az ad app credential reset --id "$APP" --append --display-name workshop \
-             --end-date "$END" --query password -o tsv)
+             --end-date "$END" --query password -o tsv | tr -d '\r')
     echo "AZURE_TENANT_ID=$TENANT"
     echo "AZURE_CLIENT_ID=$APP"
     echo "AZURE_CLIENT_SECRET=$SECRET"
