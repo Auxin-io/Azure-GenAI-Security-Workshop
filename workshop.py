@@ -237,7 +237,13 @@ def ask(client: AgentsClient, agent_id: str, question: str, thread=None) -> Turn
     tool_called = any(isinstance(s.step_details, RunStepToolCallDetails) for s in steps)
     if run.status != "completed":
         return Turn(question, f"<run {run.status}: {run.last_error}>", run.status, tool_called, steps, thread.id, run.id)
-    reply = next(m for m in client.messages.list(thread_id=thread.id) if m.role == "assistant")
+    # A run can finish "completed" and still leave no assistant message - an output content filter
+    # produces exactly that. Reaching for the message with next() then raises a bare StopIteration
+    # in the middle of an exercise, which tells the attendee nothing. Report it as an answer.
+    reply = next((m for m in client.messages.list(thread_id=thread.id) if m.role == "assistant"), None)
+    if reply is None:
+        return Turn(question, "<completed with no message - output filtered, or the agent only "
+                              "made tool calls>", run.status, tool_called, steps, thread.id, run.id)
     text = "".join(getattr(c, "text").value for c in reply.content if hasattr(c, "text"))
     return Turn(question, text, run.status, tool_called, steps, thread.id, run.id)
 
