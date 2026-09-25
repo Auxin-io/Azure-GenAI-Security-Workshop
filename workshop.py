@@ -26,6 +26,9 @@ CONFIG = {
     "tenant_id": "83014288-51f7-42ce-a2c7-cc480e9fc8c1",
     "project_endpoint": "https://docintel-ais-dggcb4.services.ai.azure.com/api/projects/docintel-finance",
     "model": "gpt-4.1-mini",
+    # The workshop service principal. A client id is not a secret - it identifies the app, it does
+    # not authenticate it - so putting it here saves every attendee typing a GUID correctly.
+    "workshop_client_id": "bddf76c5-91a0-44e1-859f-d89b08630974",
     "endpoints": {
         "finance": "https://docintel-qwen.eastus.inference.ml.azure.com/score",
         "employee": "https://employee-from-scratch.eastus.inference.ml.azure.com/score",
@@ -45,23 +48,38 @@ IN_COLAB = "google.colab" in sys.modules or os.environ.get("WORKSHOP_DEVICE_LOGI
 
 
 def sign_in(tenant_id: str = "", client_id: str = "", client_secret: str = "") -> None:
-    """Use a workshop service principal instead of your own identity.
+    """Get a credential without anyone running a script.
 
-    Call this before anything else when the facilitator handed out three values. Prefer passing
-    nothing and letting it prompt: a secret typed into a cell is saved with the notebook, and a
-    notebook with a live secret in it is the thing everyone forgets to clean up.
+    Order of preference, so the same cell works everywhere:
+      1. something already available - the notebook host's managed identity, or `az login`
+      2. AZURE_* environment variables
+      3. the workshop secret, typed once at a getpass prompt (this is the Colab path)
+
+    Only the secret is ever asked for: the tenant and the app's client id are in CONFIG because
+    neither is a credential. getpass keeps the secret out of the saved notebook.
     """
     import getpass
-    tenant_id = tenant_id or os.environ.get("AZURE_TENANT_ID") or input("AZURE_TENANT_ID: ").strip()
-    client_id = client_id or os.environ.get("AZURE_CLIENT_ID") or input("AZURE_CLIENT_ID: ").strip()
-    client_secret = (client_secret or os.environ.get("AZURE_CLIENT_SECRET")
-                     or getpass.getpass("AZURE_CLIENT_SECRET (hidden): ").strip())
-
     global _cred
+
+    if not (client_secret or os.environ.get("AZURE_CLIENT_SECRET")):
+        # Try what is already here before asking anyone for anything.
+        try:
+            probe = credential()
+            probe.get_token(ML_SCOPE)
+            print("signed in as", whoami(), "- no secret needed here")
+            return
+        except Exception:
+            _cred = None                      # nothing usable; fall through and ask
+
+    tenant_id = tenant_id or os.environ.get("AZURE_TENANT_ID") or CONFIG["tenant_id"]
+    client_id = client_id or os.environ.get("AZURE_CLIENT_ID") or CONFIG["workshop_client_id"]
+    client_secret = (client_secret or os.environ.get("AZURE_CLIENT_SECRET")
+                     or getpass.getpass("Paste the workshop secret (hidden): ").strip())
+
     from azure.identity import ClientSecretCredential
     _cred = ClientSecretCredential(tenant_id, client_id, client_secret)
     CONFIG["tenant_id"] = tenant_id
-    _cred.get_token(ML_SCOPE)                      # fail here, with a clear error, not mid-exercise
+    _cred.get_token(ML_SCOPE)                 # fail here, clearly, not mid-exercise
     print("signed in as the workshop service principal")
     print("NOTE: everyone in the room shares this identity. Your agents are visible to, and "
           "deletable by, everyone else - and nothing you do is attributable to you. "
