@@ -130,6 +130,18 @@ def score(which: str, question: str, **extra) -> dict:
                 "\n  Notebooks 02 and 04 need no endpoints and work meanwhile."
             ) from None
         raise
+    except urllib.error.HTTPError as e:
+        # An endpoint routes 0% of traffic until its deployment finishes, so a request during
+        # provisioning gets a 404 from a hostname that resolves. That is indistinguishable from a
+        # broken URL unless you say so.
+        if e.code == 404:
+            raise RuntimeError(
+                f"The {which!r} endpoint exists but is not serving yet (404)."
+                f"\n  Its deployment is probably still provisioning - a new endpoint routes"
+                "\n  0% of traffic until that finishes. Wait a few minutes and retry."
+                "\n  Facilitator check: az ml online-endpoint show -n <name> --query traffic"
+            ) from None
+        raise
 
 
 # ------------------------------------------------------------------ agents
