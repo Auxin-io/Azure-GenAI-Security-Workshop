@@ -367,3 +367,38 @@ def build_vector_store(client: AgentsClient, name: str, folder: str = "data/hr")
     ids = [client.files.upload_and_poll(file_path=str(p), purpose=FilePurpose.AGENTS).id
            for p in files]
     return client.vector_stores.create_and_poll(file_ids=ids, name=name)
+
+
+# ---------------------------------------------------------------- prompt agents (Session 4)
+#
+# This project holds TWO agent systems behind one portal, and they are not interchangeable:
+#
+#   Classic agents   AgentsClient.create_agent(), ids look like asst_...   Sessions 1 and 3
+#   Prompt agents    AIProjectClient.agents.create_version(), versioned    Session 4
+#
+# The distinction matters for governance, not style: an evaluation rule binds to a PROMPT agent
+# by name. Point one at a classic agent and the service replies "the agent does not exist" even
+# though it plainly does. That is why Session 4 builds a prompt agent rather than reusing the
+# classic one from Session 3 - and why an inventory that lists only one system is incomplete.
+
+def project_client():
+    """The newer control-plane client: prompt agents, evaluation rules, evaluators."""
+    from azure.ai.projects import AIProjectClient
+    return AIProjectClient(endpoint=CONFIG["project_endpoint"], credential=credential())
+
+
+def prompt_agents(project) -> list[str]:
+    """Names of the prompt agents. Deliberately separate from client.list_agents()."""
+    return [a.name for a in project.agents.list()]
+
+
+def ask_prompt_agent(project, name: str, question: str, version: str = "1") -> str:
+    """One turn against a prompt agent.
+
+    Each completed response is the event an evaluation rule scores, so this is both how you use
+    the agent and how you generate the evidence the next cell reads back.
+    """
+    reply = project.get_openai_client().responses.create(
+        input=question,
+        extra_body={"agent_reference": {"type": "agent_reference", "name": name, "version": version}})
+    return getattr(reply, "output_text", "") or ""

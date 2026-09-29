@@ -8,7 +8,7 @@ nothing to install.
 | **1** Architecture & Data | `01_architecture_and_data.ipynb` | See the same question answered three ways — facts trained into a model, a model that knows nothing else, and a model that searches documents instead. Then **build one agent that uses all three**. |
 | **2** Zero Trust, Threats & Attack Paths | `session2-threat-model-worksheet.md` (paper) + `02_threat_modeling.ipynb` | Threat-model the architecture on paper. Then attack the agent five ways — **two attacks succeed** — and poison its document library. |
 | **3** Building, Testing & Monitoring | `03_guarded_agent.ipynb` | Give an agent the power to approve an expense, add a human-approval gate, then **build a harness around it** and watch each control block and allow. |
-| **4** Governing & Observing | `04_govern_and_observe.ipynb` | Inventory the agents actually running, read the real permissions, check each safety control against the live agents, classify an activity log. |
+| **4** Governing & Observing | `04_govern_and_observe.ipynb` | Inventory the agents actually running, read the real permissions, then **build an agent, author an evaluator and bind a continuous evaluation rule to it** - and watch the rule catch a bad version you ship yourself. |
 
 The systems behind them:
 [Azure-FineTuning-Foundry-Agent](https://github.com/Auxin-io/Azure-FineTuning-Foundry-Agent) ·
@@ -49,13 +49,14 @@ The systems behind them:
 | **01** | `BASE` says "I'd need the document", `TUNED` says `INV-35089, $47,186.04` — the facts are in the weights. Ask about a vendor that does not exist and it **invents one**, because it was never taught that refusing is an option. The from-scratch model answers a France question with an expense report. The HR agent cites `doc-hr-001.txt` and declines what it cannot find. |
 | **02** | Wrong-premise and extraction **get through**; jailbreak and instruction-leak are stopped by the content filter; scope-escape is refused by the instructions. The poisoned `HR-209 revision` reaches the user with its password-exfil line intact. |
 | **03** | The read tool runs unattended; `approve_expense` halts the run until a human answers; a vague "sort it out" does not trigger it — but **nothing stopped it**, the model simply chose well. The harness then refuses an unknown report, refuses an over-threshold amount before any human is asked, and ends a multi-write turn on the step budget. |
-| **04** | Three agents, one project, **one shared identity**. The control check reports honestly that one agent has no grounding rule and that none of the three has a human-approval tool. |
+| **04** | Three agents, one project, **one shared identity**, and an inventory that misses half of them because the project runs two agent systems at once. Then you bind an evaluation rule to your own agent, ship a version that invents an invoice, and the rule fails it - **without anyone re-binding the rule**. The control check reports honestly that one agent has no grounding rule and that none of the three has a human-approval tool. |
 
 ## Files in this repository
 
 ```
 0[1-4]_*.ipynb                       the four sessions
-workshop.py                          sign_in(), score(), agents_client(), ask(), sample_alias()
+workshop.py                          sign_in(), score(), agents_client(), ask(), sample_alias(),
+                                     project_client(), ask_prompt_agent()  (Session 4)
 data/hr/                             ten synthetic HR documents
 session2-threat-model-worksheet.md   the Session 2 paper exercise, with facilitator notes
 requirements.txt                     for running the notebooks locally
