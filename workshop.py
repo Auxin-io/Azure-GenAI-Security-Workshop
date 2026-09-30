@@ -26,6 +26,11 @@ CONFIG = {
     "tenant_id": "83014288-51f7-42ce-a2c7-cc480e9fc8c1",
     "project_endpoint": "https://docintel-ais-dggcb4.services.ai.azure.com/api/projects/docintel-finance",
     "model": "gpt-4.1-mini",
+    # Guardrail (responsible AI) policies live on the AI Services account. An agent references
+    # one by its FULL ARM id - the short name is rejected. Authoring a policy is control-plane
+    # work; attaching one to your own agent is not, which is the split Session 4 demonstrates.
+    "rai_policies": ("/subscriptions/505beb5f-f8d4-4d47-8d2e-fa281bfc0322/resourceGroups/docintel-ml-rg"
+                     "/providers/Microsoft.CognitiveServices/accounts/docintel-ais-dggcb4/raiPolicies/"),
     # The workshop service principal. A client id is not a secret - it identifies the app, it does
     # not authenticate it - so putting it here saves every attendee typing a GUID correctly.
     "workshop_client_id": "bddf76c5-91a0-44e1-859f-d89b08630974",
