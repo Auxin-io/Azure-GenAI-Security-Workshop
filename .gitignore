@@ -19,6 +19,4 @@ run_notebook.py
 endpoints.sh
 service_principal.sh
 revoke_workshop_credential.sh
-requirements.txt
-workshop.py
 
