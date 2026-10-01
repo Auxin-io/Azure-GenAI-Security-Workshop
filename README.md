@@ -1,7 +1,6 @@
 # GenAI Security Workshop — hands-on notebooks
 
-Three notebooks and one paper exercise, running against **live Azure resources**. No mocks, no API
-keys, nothing to install.
+Three notebooks and one paper exercise, running against **live Azure resources**.
 
 ## What each session covers
 
@@ -67,7 +66,6 @@ The systems behind them:
 Auxin_Notebook_01_architecture_and_data.ipynb   Session 1
 Auxin_Notebook_03_secure_agent.ipynb            Session 3
 Auxin_Notebook_04_govern_and_observe.ipynb      Session 4
-Session2-Agentic-ThreatModel.tm7                Session 2 - the DFD, for the Microsoft Threat Modeling Tool
 Session2-Threat-Model-Worksheet-HandsOn.docx    Session 2 - the attendee worksheet
 Session2-Threat-Model-Worksheet-Referral.docx   Session 2 - the worked example, for the facilitator
 workshop.py                                     sign_in(), score(), agents_client(), ask(),
@@ -75,6 +73,3 @@ workshop.py                                     sign_in(), score(), agents_clien
 data/hr/                                        ten synthetic HR documents
 requirements.txt                                for running the notebooks locally
 ```
-
-`workshop.py` is imported by every notebook, and the Colab bootstrap copies it out of a clone of
-this repository — so it has to stay committed here for the notebooks to run.
