@@ -125,9 +125,6 @@ def sign_in(tenant_id: str = "", client_id: str = "", client_secret: str = "") -
     CONFIG["tenant_id"] = tenant_id
     _cred.get_token(ML_SCOPE)                 # fail here, clearly, not mid-exercise
     print("signed in as the workshop service principal")
-    print("NOTE: everyone in the room shares this identity. Your agents are visible to, and "
-          "deletable by, everyone else - and nothing you do is attributable to you. "
-          "Session 4 asks you to write that down as a finding.")
 
 
 def credential():
