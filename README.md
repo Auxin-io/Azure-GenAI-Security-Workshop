@@ -15,10 +15,10 @@ Three notebooks and one paper exercise, running against **live Azure resources**
 
 | Session | Material | What happens |
 |---|---|---|
-| **1** Architecture & Data | `Auxin_Notebook_01_architecture_and_data.ipynb` | See the same question answered three ways — facts trained into a model, a model that knows nothing else, and a model that searches documents instead. Then **build one agent that uses all three**. |
-| **2** Threat Modeling | `Session2-Agentic-ThreatModel.tm7` + the two worksheets | Mark the trust boundaries on the data flow diagram, then run STRIDE and DREAD against the agentic architecture. |
-| **3** Developer | `Auxin_Notebook_03_secure_agent.ipynb` | Give an agent the power to approve an expense, add a human-approval gate, then **build a harness around it** and watch each control block something. |
-| **4** GRC | `Auxin_Notebook_04_govern_and_observe.ipynb` | **Build an agent in Foundry**, attach an evaluation rule and a guardrail policy, then read the compliance score for everything it said. |
+| **1** Architecture & Data | `Session1/Auxin_Notebook_01_architecture_and_data.ipynb` | See the same question answered three ways — facts trained into a model, a model that knows nothing else, and a model that searches documents instead. Then **build one agent that uses all three**. |
+| **2** Threat Modeling | the two Session 2 worksheets (`.docx`) | Mark the trust boundaries on the data flow diagram, then run STRIDE and DREAD against the agentic architecture. |
+| **3** Developer | `Session3/Auxin_Notebook_03_secure_agent.ipynb` | Give an agent the power to approve an expense, add a human-approval gate, then **build a harness around it** and watch each control block something. |
+| **4** GRC | `Session4/Auxin_Notebook_04_govern_and_observe.ipynb` | **Build an agent in Foundry**, attach an evaluation rule and a guardrail policy, then read the compliance score for everything it said. |
 
 The systems behind them:
 [Azure-FineTuning-Foundry-Agent](https://github.com/Auxin-io/Azure-FineTuning-Foundry-Agent) ·
@@ -31,9 +31,9 @@ The systems behind them:
 
 | Session | |
 |---|---|
-| 1 | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/Auxin-io/Azure-GenAI-Security-Workshop/blob/main/Auxin_Notebook_01_architecture_and_data.ipynb) |
-| 3 | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/Auxin-io/Azure-GenAI-Security-Workshop/blob/main/Auxin_Notebook_03_secure_agent.ipynb) |
-| 4 | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/Auxin-io/Azure-GenAI-Security-Workshop/blob/main/Auxin_Notebook_04_govern_and_observe.ipynb) |
+| 1 | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/Auxin-io/Azure-GenAI-Security-Workshop/blob/main/Session1/Auxin_Notebook_01_architecture_and_data.ipynb) |
+| 3 | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/Auxin-io/Azure-GenAI-Security-Workshop/blob/main/Session3/Auxin_Notebook_03_secure_agent.ipynb) |
+| 4 | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/Auxin-io/Azure-GenAI-Security-Workshop/blob/main/Session4/Auxin_Notebook_04_govern_and_observe.ipynb) |
 
 1. **Cell 1** installs the libraries.
 2. **Cell 2** asks for the workshop secret. Paste it — it is hidden as you type, so it is never
@@ -63,11 +63,11 @@ The systems behind them:
 ## Files in this repository
 
 ```
-Auxin_Notebook_01_architecture_and_data.ipynb   Session 1
-Auxin_Notebook_03_secure_agent.ipynb            Session 3
-Auxin_Notebook_04_govern_and_observe.ipynb      Session 4
-Session2-Threat-Model-Worksheet-HandsOn.docx    Session 2 - the attendee worksheet
-Session2-Threat-Model-Worksheet-Referral.docx   Session 2 - the worked example, for the facilitator
+Session1/Auxin_Notebook_01_architecture_and_data.ipynb
+Session3/Auxin_Notebook_03_secure_agent.ipynb
+Session4/Auxin_Notebook_04_govern_and_observe.ipynb
+Session2/Session2-Threat-Model-Worksheet-HandsOn.docx    the attendee worksheet
+Session2/Session2-Threat-Model-Worksheet-Referral.docx   the worked example, for the facilitator
 workshop.py                                     sign_in(), score(), agents_client(), ask(),
                                                 sample_alias(), project_client(), ask_prompt_agent()
 data/hr/                                        ten synthetic HR documents
